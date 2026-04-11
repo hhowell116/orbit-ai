@@ -1,0 +1,984 @@
+# IT Team AI Coding Dashboard — Full Project Plan
+### Built on OpenCode + Custom React Dashboard + SQLite Broker
+
+---
+
+## WHAT WE ARE BUILDING
+
+A centralized server (jumpbox) that your entire IT team connects to via browser. Each person logs in, sees all active projects, sees who is in which project and which file/line they are working on, and clicks into any project to get a full AI-powered coding chat (Claude) directly in the browser. Sessions persist on the server. Claude can read, write, and run commands inside each project. A coordination layer prevents people from editing the same file at the same time.
+
+---
+
+## TECH STACK
+
+| Layer | Technology | Why |
+|---|---|---|
+| AI Engine | OpenCode (`opencode serve`) | Manages sessions, file tools, Claude integration, SSE events |
+| AI Model | Claude via claude.ai OAuth | No API key needed, uses existing Claude Pro/Max subscriptions |
+| Broker/Coordinator | Bun + SQLite | File locks, peer messaging, activity log, user sessions |
+| MCP Bridge | Custom MCP server (Bun) | Gives Claude awareness of other users and file locks |
+| Dashboard | React + Vite + TailwindCSS | Team overview, project list, who is where, activity feed |
+| Chat UI | React (custom, calls OpenCode SDK) | Nice text chat that wraps OpenCode sessions |
+| Reverse Proxy | Nginx | HTTPS, routes ports, auth headers |
+| Process Manager | PM2 or systemd | Keeps everything running on the jumpbox |
+| Database | SQLite (better-sqlite3) | Stores users, sessions, file locks, activity, messages |
+
+---
+
+## OPENCODE FEATURES WE ARE USING
+
+This section explains exactly which OpenCode capabilities power what, so nothing is missed.
+
+### `opencode serve`
+Starts a headless HTTP server on the jumpbox. Exposes a full REST API at port 4096. Our dashboard and broker talk to this API. We never expose this port directly — Nginx sits in front.
+
+### OpenCode SDK (`@opencode-ai/sdk`)
+The official TypeScript client for the OpenCode server. Our React dashboard uses `createOpencodeClient` to connect to the running server and call session, message, file, and event APIs directly. This is how the chat UI works — it is not a separate thing, it is React calling the OpenCode API.
+
+### Server-Sent Events (`GET /event`)
+OpenCode streams a real-time event bus. Every tool call, file edit, message, session status change, and permission request fires an event. Our broker subscribes to this stream and writes everything to SQLite. Our dashboard subscribes to this and updates in real time.
+
+### Sessions API
+- `GET /session` — list all sessions across all projects
+- `POST /session` — create a new session in a project directory
+- `POST /session/:id/message` — send a chat message, get Claude's response
+- `GET /session/:id/message` — full conversation history
+- `DELETE /session/:id` — clean up a session
+- `POST /session/:id/abort` — stop a running Claude response
+- `GET /session/:id/diff` — see what files Claude changed in a session
+- `GET /session/:id/todo` — Claude's current task list
+
+### File APIs
+- `GET /file/status` — which files are currently tracked/modified
+- `GET /file/content?path=` — read any file in the project
+- `GET /find/file?query=` — fuzzy search for files
+- `GET /find?pattern=` — search file contents
+
+### Plugin System (`tool.execute.before`, `tool.execute.after`)
+We write one OpenCode plugin that intercepts every file edit. When Claude tries to write to a file, the plugin checks our broker's SQLite for a file lock. If another user owns that lock, the plugin returns an error message to Claude and Claude stops and tells the user. This is the "don't touch that file" feature.
+
+### `tool.execute.after` + `file.edited` events
+Used to record file lock acquisition. When Claude successfully edits a file, we log which session/user owns an active edit on that file. When the session goes idle or the user releases it, the lock is cleared.
+
+### `session.idle` + `session.status` events
+Tell us when Claude has finished responding. We use these to update the dashboard status indicators (thinking / idle / error) in real time.
+
+### `message.updated` events
+Fired as Claude streams its response. We pipe these into the chat UI so messages appear token by token, like a real chat.
+
+### `permission.asked` events
+When Claude wants to run a bash command or edit a file and needs approval, this event fires. We surface it in the dashboard as a notification so the user can approve or deny without being in the terminal.
+
+### `opencode run --attach`
+Lets us send a non-interactive one-shot prompt to a running server session from the command line. Useful for automated tasks and scripting against the platform.
+
+### `opencode stats`
+Token usage and cost per project, per user, per model. We expose this in the dashboard as a usage/cost panel.
+
+### `opencode export [sessionID]`
+Exports a full session as JSON. Used for session backup, audit log export, and the "hand off this session to a teammate" feature.
+
+### `opencode import`
+Import a previously exported session. Used when handing work between team members.
+
+### AGENTS.md per project
+Each project folder has an `AGENTS.md` that tells Claude what the project is, what conventions to follow, what commands to run for tests, and what files to avoid. This is committed to Git and shared across the team automatically.
+
+### Skills (`SKILL.md`)
+Reusable instruction blocks stored in `.opencode/skills/`. We create IT-team-specific skills like `deploy-procedure`, `incident-response`, `code-review-checklist` that Claude can load on demand.
+
+### Agent Permissions per project
+Each project's `opencode.json` defines what Claude is allowed to do. Production-adjacent projects get `bash: ask` so Claude has to ask before running commands. Dev projects get `bash: allow` for speed.
+
+### Compaction (`session.compacted` event)
+When a session's context gets full, OpenCode automatically summarizes it. Our broker logs this event so team members know their session was compacted and can review what was summarized.
+
+### `opencode session list --format json`
+Used by our broker on startup to sync existing sessions into SQLite.
+
+---
+
+## FULL PROJECT PLAN
+
+---
+
+### PHASE 0 — JUMPBOX PREPARATION
+**Goal:** Clean, secure server ready to receive the application.
+
+**Step 0.1 — Provision the server**
+- OS: Ubuntu 22.04 LTS
+- Minimum specs: 4 CPU, 8GB RAM, 50GB SSD
+- Open ports: 22 (SSH, restricted to team IPs), 80 (HTTP, redirect to HTTPS), 443 (HTTPS)
+- All other ports closed on the firewall
+- Create a non-root service account: `aiuser`
+- All application processes run as `aiuser`, never root
+
+**Step 0.2 — Install base dependencies**
+```bash
+# Node.js 20 LTS
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Bun (for broker and OpenCode)
+curl -fsSL https://bun.sh/install | bash
+
+# Nginx
+sudo apt-get install -y nginx
+
+# PM2 (process manager)
+npm install -g pm2
+
+# Git
+sudo apt-get install -y git
+```
+
+**Step 0.3 — Install OpenCode**
+```bash
+# Install as aiuser, pin to a specific version
+npm install -g opencode-ai@<SPECIFIC_VERSION>
+
+# Verify
+opencode --version
+```
+Pin the version. Write it down. Do not use `@latest` in production. Only upgrade after reading the changelog.
+
+**Step 0.4 — Create project directory structure**
+```
+/projects/
+  crm/
+    opencode.json
+    AGENTS.md
+    .opencode/
+      skills/
+      plugins/
+  helpdesk/
+    opencode.json
+    AGENTS.md
+  infrastructure/
+    opencode.json
+    AGENTS.md
+  [add more as needed]
+```
+
+**Step 0.5 — Outbound firewall rules**
+Only allow outbound to:
+- `api.anthropic.com` (Claude API)
+- `npm registry` (only during install, lock down after)
+- Block everything else outbound from `aiuser`
+
+---
+
+### PHASE 1 — OPENCODE SERVER SETUP
+**Goal:** OpenCode running headless on the jumpbox, one project accessible via API.
+
+**Step 1.1 — Create global OpenCode config**
+
+File: `/home/aiuser/.config/opencode/opencode.json`
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "model": "anthropic/claude-sonnet-4-5",
+  "small_model": "anthropic/claude-haiku-4-5",
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "ask",
+    "bash": "ask",
+    "webfetch": "allow",
+    "external_directory": "deny"
+  }
+}
+```
+
+**Step 1.2 — Create per-project opencode.json**
+
+Example for `/projects/crm/opencode.json`:
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-5",
+  "share": "disabled",
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "ask",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "grep *": "allow",
+      "npm test": "allow",
+      "npm run lint": "allow",
+      "rm *": "deny"
+    }
+  }
+}
+```
+
+**Step 1.3 — Create AGENTS.md per project**
+
+Run `/init` inside each project folder to auto-generate, then review and commit to Git. This file tells Claude what the project is, how to build it, what conventions to follow.
+
+**Step 1.4 — Authenticate Claude**
+
+For each team member's auth, they will do this step themselves via the dashboard later. For initial testing, run as `aiuser`:
+```bash
+cd /projects/crm
+opencode auth login
+# Select Anthropic -> Claude Pro/Max -> browser opens -> authenticate
+```
+Auth token is stored in `~/.local/share/opencode/auth.json`.
+
+**Step 1.5 — Test OpenCode serve**
+```bash
+cd /projects/crm
+OPENCODE_SERVER_PASSWORD=testpassword opencode serve --port 4096 --hostname 127.0.0.1
+```
+Verify the API is accessible: `curl -u opencode:testpassword http://localhost:4096/global/health`
+
+**Step 1.6 — Set up PM2 to run OpenCode per project**
+
+Each project runs its own OpenCode server on its own port:
+- CRM: port 4096
+- Helpdesk: port 4097
+- Infrastructure: port 4098
+
+PM2 ecosystem file at `/home/aiuser/ecosystem.config.js`:
+```js
+module.exports = {
+  apps: [
+    {
+      name: 'opencode-crm',
+      cwd: '/projects/crm',
+      script: 'opencode',
+      args: 'serve --port 4096 --hostname 127.0.0.1',
+      env: {
+        OPENCODE_SERVER_PASSWORD: 'CHANGEME',
+        OPENCODE_SERVER_USERNAME: 'opencode'
+      }
+    },
+    {
+      name: 'opencode-helpdesk',
+      cwd: '/projects/helpdesk',
+      script: 'opencode',
+      args: 'serve --port 4097 --hostname 127.0.0.1',
+      env: {
+        OPENCODE_SERVER_PASSWORD: 'CHANGEME'
+      }
+    }
+  ]
+}
+```
+Start: `pm2 start ecosystem.config.js && pm2 save`
+
+---
+
+### PHASE 2 — THE BROKER SERVER
+**Goal:** SQLite-backed coordination server that tracks users, sessions, file locks, and activity. This is the brain of the team layer.
+
+**Step 2.1 — Initialize the broker project**
+```bash
+mkdir /home/aiuser/broker
+cd /home/aiuser/broker
+bun init
+bun add better-sqlite3 @types/better-sqlite3 hono zod
+```
+
+**Step 2.2 — Design the SQLite schema**
+
+File: `broker/schema.sql`
+```sql
+-- Users (your IT team members)
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  display_name TEXT NOT NULL,
+  claude_auth_token TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_seen DATETIME
+);
+
+-- Projects (mirrors /projects/ directory)
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  path TEXT UNIQUE NOT NULL,
+  opencode_port INTEGER UNIQUE NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sessions (one per user per project conversation)
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,           -- OpenCode session ID
+  project_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  title TEXT,
+  status TEXT DEFAULT 'idle',    -- idle | thinking | error
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- File locks (who is editing what right now)
+CREATE TABLE IF NOT EXISTS file_locks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  line_start INTEGER,            -- which line Claude is editing
+  line_end INTEGER,
+  locked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(project_id, file_path), -- one lock per file per project
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Activity log (everything Claude does, forever)
+CREATE TABLE IF NOT EXISTS activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,      -- file.edited | bash.ran | message.sent | session.created | file.lock.acquired | file.lock.released
+  file_path TEXT,
+  line_start INTEGER,
+  line_end INTEGER,
+  detail TEXT,                   -- JSON blob with extra info
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Peer messages (the "hey what are you working on" feature)
+CREATE TABLE IF NOT EXISTS peer_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_user_id TEXT NOT NULL,
+  to_user_id TEXT NOT NULL,
+  session_id TEXT,
+  message TEXT NOT NULL,
+  read INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Token usage per session (from opencode stats)
+CREATE TABLE IF NOT EXISTS token_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  input_tokens INTEGER DEFAULT 0,
+  output_tokens INTEGER DEFAULT 0,
+  model TEXT,
+  recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Step 2.3 — Build the broker HTTP server**
+
+The broker is a Bun/Hono server with these endpoints. File: `broker/server.ts`
+
+```
+Auth endpoints:
+  POST /auth/login          — user logs in with username + password
+  POST /auth/logout         — clears session
+  GET  /auth/me             — current user info
+
+User endpoints:
+  GET  /users               — list all users and their current status
+  GET  /users/:id/activity  — activity feed for a user
+
+Project endpoints:
+  GET  /projects            — list all projects with active user count
+  GET  /projects/:id        — single project details
+  GET  /projects/:id/users  — who is currently active in this project
+  GET  /projects/:id/files  — active file locks in this project
+  GET  /projects/:id/activity — recent activity feed for project
+
+Session endpoints:
+  GET  /sessions            — all active sessions across all projects
+  POST /sessions            — create a new session (proxies to OpenCode)
+  GET  /sessions/:id        — session details
+  DELETE /sessions/:id      — end a session
+
+File lock endpoints:
+  GET  /locks               — all current file locks
+  GET  /locks/:projectId    — locks for a specific project
+  POST /locks               — acquire a file lock (called by plugin)
+  DELETE /locks/:id         — release a file lock (called by plugin)
+
+Peer messaging:
+  POST /messages            — send a message to a teammate
+  GET  /messages            — get your unread messages
+  PATCH /messages/:id/read  — mark message as read
+
+Activity feed:
+  GET  /activity            — global activity feed (SSE stream)
+  GET  /activity/recent     — last 50 events across all projects
+
+Token usage:
+  GET  /usage               — usage summary per user per project
+```
+
+**Step 2.4 — Build the OpenCode event subscriber**
+
+This runs inside the broker and subscribes to each OpenCode server's SSE event stream. File: `broker/event-subscriber.ts`
+
+```typescript
+// For each project's OpenCode server, subscribe to /event
+// Parse incoming events and write to SQLite
+
+const EVENT_HANDLERS = {
+  'tool.execute.after': (event, projectId, userId) => {
+    if (event.tool === 'edit' || event.tool === 'write') {
+      // Acquire file lock
+      db.run(`INSERT OR REPLACE INTO file_locks 
+        (project_id, file_path, user_id, session_id, line_start, line_end)
+        VALUES (?, ?, ?, ?, ?, ?)`,
+        [projectId, event.args.filePath, userId, event.sessionId, 
+         event.args.startLine, event.args.endLine])
+      
+      // Log activity
+      logActivity(projectId, userId, event.sessionId, 'file.edited', event.args.filePath)
+    }
+    if (event.tool === 'bash') {
+      logActivity(projectId, userId, event.sessionId, 'bash.ran', null, event.args.command)
+    }
+  },
+  'session.idle': (event, projectId, userId) => {
+    // Release all file locks for this session
+    db.run(`DELETE FROM file_locks WHERE session_id = ?`, [event.sessionId])
+    updateSessionStatus(event.sessionId, 'idle')
+  },
+  'session.status': (event, projectId, userId) => {
+    updateSessionStatus(event.sessionId, event.status)
+  },
+  'message.updated': (event, projectId, userId) => {
+    // Broadcast to dashboard via SSE
+    broadcastToClients({ type: 'message.updated', ...event })
+  },
+  'session.created': (event, projectId, userId) => {
+    db.run(`INSERT OR IGNORE INTO sessions (id, project_id, user_id, title)
+      VALUES (?, ?, ?, ?)`, [event.sessionId, projectId, userId, event.title])
+  },
+  'session.compacted': (event, projectId, userId) => {
+    logActivity(projectId, userId, event.sessionId, 'session.compacted')
+  }
+}
+```
+
+**Step 2.5 — Add PM2 entry for broker**
+
+Add to ecosystem.config.js:
+```js
+{
+  name: 'broker',
+  cwd: '/home/aiuser/broker',
+  script: 'bun',
+  args: 'run server.ts',
+  env: {
+    BROKER_PORT: '5000',
+    BROKER_JWT_SECRET: 'GENERATE_A_STRONG_SECRET',
+    DB_PATH: '/home/aiuser/broker/team.db'
+  }
+}
+```
+
+---
+
+### PHASE 3 — THE OPENCODE PLUGIN (File Lock Enforcement)
+**Goal:** Claude in every session is aware of file locks and stops before editing a locked file.
+
+**Step 3.1 — Create the plugin**
+
+File: `/home/aiuser/.config/opencode/plugins/team-coordinator.ts`
+
+This plugin is global — it applies to every project on the server.
+
+```typescript
+import type { Plugin } from "@opencode-ai/plugin"
+
+const BROKER_URL = "http://localhost:5000"
+const SESSION_USER_MAP = new Map<string, string>() // sessionId -> userId
+
+export const TeamCoordinatorPlugin: Plugin = async ({ client, project }) => {
+  return {
+    // Before any file edit, check if another user has a lock
+    "tool.execute.before": async (input, output) => {
+      if (input.tool !== 'edit' && input.tool !== 'write' && input.tool !== 'apply_patch') return
+      
+      const filePath = output.args.filePath || output.args.path
+      if (!filePath) return
+      
+      const projectId = getProjectId(project.path)
+      const sessionId = input.sessionId
+      const currentUserId = SESSION_USER_MAP.get(sessionId)
+      
+      // Check broker for existing lock
+      const res = await fetch(`${BROKER_URL}/locks/${projectId}`)
+      const locks = await res.json()
+      const existingLock = locks.find(l => l.file_path === filePath)
+      
+      if (existingLock && existingLock.user_id !== currentUserId) {
+        // Block the edit and tell Claude who has the lock
+        throw new Error(
+          `⚠️ FILE LOCKED: ${filePath} is currently being edited by ${existingLock.user_display_name}. ` +
+          `They have been working on it since ${existingLock.locked_at}. ` +
+          `Do not edit this file. Inform the user and suggest they coordinate with ${existingLock.user_display_name} first.`
+        )
+      }
+    },
+
+    // After a successful edit, register the lock
+    "tool.execute.after": async (input, output) => {
+      if (input.tool !== 'edit' && input.tool !== 'write' && input.tool !== 'apply_patch') return
+      
+      const filePath = output.args.filePath || output.args.path
+      if (!filePath) return
+      
+      const projectId = getProjectId(project.path)
+      const sessionId = input.sessionId
+      const userId = SESSION_USER_MAP.get(sessionId)
+      
+      await fetch(`${BROKER_URL}/locks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          file_path: filePath,
+          user_id: userId,
+          session_id: sessionId,
+          line_start: output.args.startLine,
+          line_end: output.args.endLine
+        })
+      })
+    },
+
+    // When session goes idle, release all locks
+    "event": async ({ event }) => {
+      if (event.type === 'session.idle' || event.type === 'session.deleted') {
+        await fetch(`${BROKER_URL}/locks/session/${event.properties.id}`, {
+          method: 'DELETE'
+        })
+      }
+    }
+  }
+}
+
+function getProjectId(projectPath: string): string {
+  return projectPath.split('/').pop() || projectPath
+}
+```
+
+**Step 3.2 — Register the plugin in global config**
+
+Add to `/home/aiuser/.config/opencode/opencode.json`:
+```json
+{
+  "plugin": []
+}
+```
+Since it is a local file plugin in `~/.config/opencode/plugins/`, it loads automatically. No npm entry needed.
+
+---
+
+### PHASE 4 — NGINX REVERSE PROXY
+**Goal:** One clean HTTPS entry point for all services.
+
+**Step 4.1 — Install SSL certificate**
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d yourdomain.com
+```
+
+**Step 4.2 — Nginx config**
+
+File: `/etc/nginx/sites-available/ai-dashboard`
+
+```nginx
+# Dashboard (React app)
+server {
+  listen 443 ssl;
+  server_name yourdomain.com;
+  
+  ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+  # Serve React dashboard
+  location / {
+    root /home/aiuser/dashboard/dist;
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Broker API
+  location /api/ {
+    proxy_pass http://localhost:5000/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_cache_bypass $http_upgrade;
+  }
+
+  # OpenCode per-project API (proxied by project name)
+  location /opencode/crm/ {
+    proxy_pass http://localhost:4096/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_buffering off;          # Required for SSE to work
+    proxy_cache off;
+    proxy_read_timeout 86400;
+  }
+
+  location /opencode/helpdesk/ {
+    proxy_pass http://localhost:4097/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 86400;
+  }
+}
+
+# Redirect HTTP to HTTPS
+server {
+  listen 80;
+  server_name yourdomain.com;
+  return 301 https://$host$request_uri;
+}
+```
+
+---
+
+### PHASE 5 — THE REACT DASHBOARD
+**Goal:** The web app your team opens in their browser. Clean, modern, shows everything.
+
+**Step 5.1 — Initialize the project**
+```bash
+cd /home/aiuser
+bun create vite dashboard --template react-ts
+cd dashboard
+bun add @opencode-ai/sdk @tanstack/react-query axios zustand react-router-dom
+bun add -d tailwindcss @tailwindcss/vite
+```
+
+**Step 5.2 — Application structure**
+```
+dashboard/src/
+  pages/
+    LoginPage.tsx          — username/password login form
+    ProjectsPage.tsx       — main landing: all projects, who is in each one
+    ProjectPage.tsx        — single project: chat + file activity sidebar
+    ActivityPage.tsx       — global activity feed across all projects
+    UsagePage.tsx          — token usage and cost per user/project
+  components/
+    ProjectCard.tsx        — project tile showing name, active users, last activity
+    UserBadge.tsx          — avatar + name + current status indicator
+    FileLockIndicator.tsx  — shows which files are locked and by whom
+    ChatWindow.tsx         — the actual Claude chat UI
+    MessageBubble.tsx      — individual chat message with tool call expansions
+    ActivityFeed.tsx       — live scrolling event log
+    PeerMessage.tsx        — team member direct message notification
+    SessionStatus.tsx      — thinking/idle/error indicator
+    ToolCallCard.tsx       — expandable card showing what tool Claude called
+  hooks/
+    useOpenCode.ts         — wrapper around @opencode-ai/sdk client
+    useBroker.ts           — wrapper around broker REST API calls
+    useEventStream.ts      — subscribes to broker SSE activity stream
+    useFileLocks.ts        — real-time file lock state
+  stores/
+    authStore.ts           — current user, JWT token (Zustand)
+    sessionStore.ts        — active sessions across projects
+    lockStore.ts           — current file locks
+```
+
+**Step 5.3 — Projects Page behavior**
+
+This is the home screen after login. It shows:
+- Grid of project cards
+- Each card shows: project name, description, number of active users with their avatars, last activity timestamp, current status (active / idle)
+- Click a project card → navigates to that project's page
+- Live updates via SSE from broker — user counts and status update without refresh
+
+**Step 5.4 — Project Page (the main working screen)**
+
+Split layout:
+- **Left panel (70%):** Claude chat window. Text input at bottom. Messages stream in real time. Each tool call Claude makes (file edit, bash command) is shown as an expandable card in the message thread so you can see exactly what Claude did.
+- **Right panel (30%):** 
+  - "Who's here" section — team members currently in this project with their status
+  - "Active file locks" section — list of files currently being edited, by whom, since when. Color coded (green = yours, yellow = teammate's)
+  - "Recent activity" section — live feed of actions in this project
+
+**Step 5.5 — The Chat UI (how it connects to OpenCode)**
+
+```typescript
+// hooks/useOpenCode.ts
+import { createOpencodeClient } from "@opencode-ai/sdk"
+
+export function useOpenCode(projectName: string) {
+  const client = createOpencodeClient({
+    baseUrl: `https://yourdomain.com/opencode/${projectName}`
+  })
+
+  const sendMessage = async (sessionId: string, text: string) => {
+    return client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        parts: [{ type: "text", text }],
+        model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" }
+      }
+    })
+  }
+
+  const streamEvents = async (onEvent: (e: any) => void) => {
+    const events = await client.event.subscribe()
+    for await (const event of events.stream) {
+      onEvent(event)
+    }
+  }
+
+  return { client, sendMessage, streamEvents }
+}
+```
+
+**Step 5.6 — File lock display logic**
+
+```typescript
+// hooks/useFileLocks.ts
+// Polls broker every 5 seconds for current locks in the active project
+// Also subscribes to broker SSE for instant lock updates
+// Returns: { locks: FileLock[], isMyFile: (path) => boolean, lockedBy: (path) => User | null }
+```
+
+When a user sees a file locked by a teammate, they see:
+- The file path highlighted in orange in the activity panel
+- Tooltip: "Alice has been editing auth.ts since 2:34pm"
+- If they try to ask Claude to edit that file, Claude will refuse (via the plugin) and explain who has the lock
+
+**Step 5.7 — Peer messaging**
+
+Small notification bell icon in the header. When a teammate sends you a message, a badge appears. Click it to see the message inline. Reply goes back through the broker. Messages are stored in SQLite and marked read.
+
+**Step 5.8 — Build and deploy**
+```bash
+bun run build
+# Output goes to /home/aiuser/dashboard/dist
+# Nginx serves this directory as the root
+```
+
+---
+
+### PHASE 6 — USER AUTH SYSTEM
+**Goal:** Each team member has their own login. JWT-based, simple.
+
+**Step 6.1 — User management**
+
+The broker handles auth. No OAuth needed — simple username/password for the dashboard itself. Each user's Claude auth is separate (their own claude.ai token stored in their user record encrypted).
+
+Admin creates user accounts manually in SQLite initially:
+```sql
+INSERT INTO users (id, username, display_name, password_hash)
+VALUES ('uuid', 'alice', 'Alice Smith', 'bcrypt_hash_here');
+```
+
+Add a simple CLI command to the broker for creating users:
+```bash
+bun run broker/cli.ts create-user --username alice --name "Alice Smith"
+```
+
+**Step 6.2 — JWT flow**
+
+1. User opens dashboard in browser
+2. Enters username + password on login page
+3. Broker validates, returns JWT (24hr expiry)
+4. JWT stored in memory (not localStorage — security)
+5. All requests to broker and OpenCode include JWT in Authorization header
+6. Nginx strips and re-adds internal auth headers before forwarding to OpenCode
+
+**Step 6.3 — Claude auth per user**
+
+Each user authenticates with their own Claude account once:
+1. User logs into dashboard
+2. Sees "Connect Claude" button if not yet authenticated
+3. Clicking it opens an OAuth flow to claude.ai in a new tab
+4. On return, the token is stored encrypted in their user record in SQLite
+5. When their sessions run, the broker injects their token into the OpenCode config for that session
+
+---
+
+### PHASE 7 — SKILLS AND TEAM RULES
+**Goal:** Claude is pre-trained on your IT team's conventions so every session starts smart.
+
+**Step 7.1 — Global AGENTS.md**
+
+File: `/home/aiuser/.config/opencode/AGENTS.md`
+```markdown
+# IT Team AI Assistant — Global Rules
+
+You are working as part of the IT team at [Company Name].
+
+## General Rules
+- Always ask before running destructive commands (rm, drop, delete)
+- Never commit credentials, passwords, or API keys to code
+- When editing infrastructure code, add a comment explaining what changed and why
+- Prefer readable code over clever code
+- Before editing a file, check if it is locked by another team member using the check_file_locks tool
+
+## Code Standards
+- Use TypeScript where possible
+- Follow existing naming conventions in each project
+- Write tests for new functions
+- Document public APIs
+
+## Communication
+- When you finish a task, summarize what you changed and why
+- If you are unsure about a decision, ask the user before proceeding
+```
+
+**Step 7.2 — Create IT team skills**
+
+`.opencode/skills/deploy-procedure/SKILL.md`:
+```markdown
+---
+name: deploy-procedure
+description: Step-by-step deployment procedure for production releases
+---
+## Deploy Procedure
+1. Run full test suite
+2. Update CHANGELOG.md
+3. Create git tag
+4. Push to main branch
+5. Monitor deployment logs for 10 minutes
+6. Verify health checks pass
+```
+
+`.opencode/skills/incident-response/SKILL.md`:
+```markdown
+---
+name: incident-response
+description: What to do when a production incident is detected
+---
+[your team's incident runbook here]
+```
+
+---
+
+### PHASE 8 — SECURITY HARDENING
+**Goal:** Lock down everything before the team uses it for real work.
+
+**Step 8.1 — OpenCode security**
+- `autoupdate: false` in all opencode.json configs
+- Zero community plugins installed
+- `share: "disabled"` in all configs
+- `external_directory: "deny"` in permissions so Claude cannot access files outside the project directory
+- `rm *: "deny"` in bash permissions across all projects
+
+**Step 8.2 — Broker security**
+- All broker endpoints require valid JWT
+- JWT secret is a 256-bit random value stored as environment variable, never in code
+- Passwords stored as bcrypt hashes (cost factor 12)
+- SQL queries use parameterized statements only — no string concatenation
+- Rate limiting: max 100 requests per IP per minute
+
+**Step 8.3 — Server security**
+- UFW firewall: only ports 22, 80, 443 open inbound
+- Fail2ban on SSH
+- SSH key auth only, password auth disabled
+- `aiuser` has no sudo access
+- `/projects` directory owned by `aiuser`, no world-readable permissions
+- Nightly SQLite backup to separate storage
+
+**Step 8.4 — Ongoing**
+- Review OpenCode changelog before any version upgrade
+- Quarterly review of what Claude was allowed to do (check activity log for `bash.ran` events)
+- Keep a list of exactly which npm packages are installed and at what versions
+
+---
+
+### PHASE 9 — TESTING AND ROLLOUT
+**Goal:** Validate with one user before the full team.
+
+**Step 9.1 — Solo testing checklist**
+- [ ] Login works, JWT issued correctly
+- [ ] Projects page loads and shows all projects
+- [ ] Can create a new session in a project
+- [ ] Chat UI sends a message and Claude responds with streaming
+- [ ] Tool calls (file edits, bash) appear as cards in the chat
+- [ ] File lock is created in SQLite when Claude edits a file
+- [ ] File lock is released when session goes idle
+- [ ] Activity feed updates in real time
+- [ ] Token usage is recorded in SQLite
+
+**Step 9.2 — Two-user testing checklist**
+- [ ] Both users can be in the same project simultaneously
+- [ ] Each user sees the other's avatar in the "Who's here" panel
+- [ ] When User A edits a file, User B sees it locked in the activity panel
+- [ ] When User B's Claude tries to edit the same file, it gets blocked with a clear message
+- [ ] File lock releases when User A's session goes idle
+- [ ] Peer message sent from User A appears as notification for User B
+- [ ] Both users' activity appears in the global activity feed
+
+**Step 9.3 — Full team rollout**
+- Create user accounts for each team member
+- Walk each person through the Claude auth connection flow
+- Share the global AGENTS.md and ask each team member to review it
+- Run one team session where everyone works on different projects simultaneously
+- After one week, review the activity log and token usage to understand patterns
+
+---
+
+## OPENCODE FEATURES NOT USED (AND WHY)
+
+| Feature | Decision |
+|---|---|
+| `opencode web` built-in UI | Not used — we build our own dashboard with team features |
+| Community plugins (ecosystem page) | Not used — security risk, build what we need ourselves |
+| `share` feature | Disabled — data stays on jumpbox |
+| `autoupdate` | Disabled — only upgrade deliberately |
+| GitHub Actions integration | Out of scope for v1 |
+| GitLab Duo provider | Out of scope, using Anthropic directly |
+| mDNS discovery | Not needed, fixed URLs on jumpbox |
+| Multiple LLM providers | Not needed, team uses Claude only |
+| OpenCode Zen subscription | Not needed, team has Claude Pro/Max already |
+
+---
+
+## SUMMARY OF WHAT EACH PIECE DOES
+
+| Piece | What It Does For Your Team |
+|---|---|
+| OpenCode serve (per project) | Runs Claude sessions for that project. Gives Claude hands on the codebase. Exposes the API and event stream. |
+| OpenCode plugin | Enforces file locks. Checks the broker before letting Claude edit any file. Releases locks when sessions end. |
+| AGENTS.md per project | Tells Claude what each project is, how to build and test it, what conventions to follow. Every session starts with this context automatically. |
+| Skills | Reusable instructions Claude can load on demand. Your deploy procedure, incident runbook, code review checklist. |
+| Broker server | The team brain. Knows who is logged in, which project they are in, which files are locked, all activity history. |
+| SQLite database | Persistent storage for all of the above. Sessions, locks, messages, activity, token usage. |
+| React dashboard | What your team sees in their browser. Projects page, chat UI, file lock indicators, activity feed, peer messages, usage stats. |
+| Nginx | Puts everything behind HTTPS. Routes `/api/` to broker, `/opencode/crm/` to OpenCode, `/` to the dashboard. |
+| PM2 | Keeps all processes running. Auto-restarts if anything crashes. |
+
+---
+
+## BUILD ORDER
+
+1. Phase 0 — Jumpbox prep (1 day)
+2. Phase 1 — OpenCode running, one project, verify API works (1 day)
+3. Phase 2 — Broker server with SQLite schema and event subscriber (1-2 weeks)
+4. Phase 3 — OpenCode plugin for file locks (2-3 days)
+5. Phase 4 — Nginx with HTTPS (half day)
+6. Phase 5 — React dashboard, projects page and chat UI first (2-3 weeks)
+7. Phase 6 — User auth system (3-4 days)
+8. Phase 7 — Skills and AGENTS.md for each project (1-2 days)
+9. Phase 8 — Security hardening (1 day)
+10. Phase 9 — Testing and rollout (1 week)
+
+**Total realistic timeline: 6-8 weeks** for one developer building this solo.

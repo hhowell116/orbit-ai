@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.bun/
+*.db
+bun.lock
+package-lock.json
+cloudflared.exe
+.env
+*.log
