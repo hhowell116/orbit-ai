@@ -1,0 +1,271 @@
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuthStore } from "../stores/authStore";
+import { useBroker } from "../hooks/useBroker";
+import { OrbitalBackground } from "../components/OrbitalBackground";
+
+interface Member {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  joined_at: string;
+}
+
+interface Invite {
+  id: number;
+  code: string;
+  use_count: number;
+  max_uses: number | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export function TeamSettingsPage() {
+  const { teamId } = useParams<{ teamId: string }>();
+  const navigate = useNavigate();
+  const { user, activeTeam } = useAuthStore();
+  const broker = useBroker();
+
+  const [members, setMembers] = useState<Member[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeyMsg, setApiKeyMsg] = useState("");
+
+  const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
+  const isOwner = activeTeam?.role === "owner";
+
+  useEffect(() => {
+    if (!teamId) return;
+    Promise.all([
+      broker.getTeamMembers(teamId).then(setMembers),
+      broker.getTeam(teamId).then((t: any) => setHasApiKey(!!t.has_api_key)),
+      isOwnerOrAdmin ? broker.getInvites(teamId).then(setInvites) : Promise.resolve(),
+    ])
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [teamId]);
+
+  async function handleSaveApiKey() {
+    if (!teamId || !apiKey) return;
+    setApiKeySaving(true);
+    setApiKeyMsg("");
+    try {
+      await broker.updateTeam(teamId, { anthropic_api_key: apiKey });
+      setHasApiKey(true);
+      setApiKey("");
+      setApiKeyMsg("Connected!");
+      setTimeout(() => setApiKeyMsg(""), 3000);
+    } catch (err: any) {
+      setApiKeyMsg(err.message || "Failed to save");
+    } finally {
+      setApiKeySaving(false);
+    }
+  }
+
+  async function handleDisconnectClaude() {
+    if (!teamId || !confirm("Remove the API key? Claude chat will stop working.")) return;
+    try {
+      await broker.updateTeam(teamId, { anthropic_api_key: "" });
+      setHasApiKey(false);
+    } catch {}
+  }
+
+  async function handleGenerateInvite() {
+    if (!teamId) return;
+    const invite = await broker.createInvite(teamId);
+    setInvites((prev) => [invite, ...prev]);
+  }
+
+  async function handleRevokeInvite(inviteId: number) {
+    if (!teamId) return;
+    await broker.revokeInvite(teamId, inviteId);
+    setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!teamId || !confirm("Remove this member from the team?")) return;
+    await broker.removeTeamMember(teamId, userId);
+    setMembers((prev) => prev.filter((m) => m.id !== userId));
+  }
+
+  async function handleChangeRole(userId: string, role: string) {
+    if (!teamId) return;
+    await broker.updateMemberRole(teamId, userId, role);
+    setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role } : m)));
+  }
+
+  function copyCode(code: string) {
+    navigator.clipboard.writeText(code);
+    setCopied(code);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  return (
+    <div className="min-h-screen relative" style={{ background: "var(--color-bg-base)" }}>
+      <OrbitalBackground />
+      <div className="max-w-2xl mx-auto pt-10 px-4 pb-20 relative" style={{ zIndex: 1 }}>
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => navigate("/")} className="text-sm" style={{ color: "var(--color-text-muted)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+            &larr; Dashboard
+          </button>
+          <div className="pl-4" style={{ borderLeft: "1px solid var(--color-border)" }}>
+            <h1 className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name}</h1>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Team Settings</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12 text-sm" style={{ color: "var(--color-text-muted)" }}>Loading...</div>
+        ) : (
+          <div className="space-y-6">
+            {/* Connect to Claude */}
+            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
+                Connect to Claude
+              </h2>
+              {hasApiKey ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                    <span className="text-sm" style={{ color: "var(--color-success)" }}>Connected</span>
+                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>— Anthropic API key is set</span>
+                  </div>
+                  {isOwnerOrAdmin && (
+                    <button onClick={handleDisconnectClaude} className="text-xs px-3 py-1.5 rounded-lg"
+                      style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+              ) : isOwnerOrAdmin ? (
+                <div>
+                  <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
+                    Enter your Anthropic API key to enable Claude in all projects. Get one at{" "}
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
+                      style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
+                      style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                      onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                      onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                      placeholder="sk-ant-..."
+                    />
+                    <button onClick={handleSaveApiKey} disabled={apiKeySaving || !apiKey}
+                      className="px-4 py-2 rounded-lg text-sm font-medium"
+                      style={{
+                        background: apiKeySaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
+                        color: apiKeySaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                        cursor: apiKeySaving || !apiKey ? "not-allowed" : "pointer",
+                      }}>
+                      {apiKeySaving ? "Saving..." : "Connect"}
+                    </button>
+                  </div>
+                  {apiKeyMsg && (
+                    <p className="text-xs mt-2" style={{ color: apiKeyMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{apiKeyMsg}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-error)" }} />
+                  <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>Not connected</span>
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>— Ask your team admin to add an API key</span>
+                </div>
+              )}
+            </div>
+
+            {/* Members */}
+            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
+                Members ({members.length})
+              </h2>
+              <div className="space-y-2">
+                {members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                    <span className="text-sm flex-1" style={{ color: "var(--color-text-primary)" }}>{m.display_name}</span>
+                    <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>@{m.username}</span>
+                    {isOwner && m.id !== user?.id ? (
+                      <select
+                        value={m.role}
+                        onChange={(e) => handleChangeRole(m.id, e.target.value)}
+                        className="text-xs px-2 py-1 rounded focus:outline-none"
+                        style={{ background: "var(--color-bg-base)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                      >
+                        <option value="member">member</option>
+                        <option value="admin">admin</option>
+                        <option value="owner">owner</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full" style={{
+                        background: m.role === "owner" ? "var(--color-primary-muted)" : "var(--color-bg-hover)",
+                        color: m.role === "owner" ? "var(--color-primary)" : "var(--color-text-muted)",
+                      }}>{m.role}</span>
+                    )}
+                    {isOwnerOrAdmin && m.id !== user?.id && m.role !== "owner" && (
+                      <button onClick={() => handleRemoveMember(m.id)} className="text-xs px-1" style={{ color: "var(--color-text-muted)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                        x
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Invite Codes */}
+            {isOwnerOrAdmin && (
+              <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                    Invite Codes
+                  </h2>
+                  <button onClick={handleGenerateInvite}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    + Generate Code
+                  </button>
+                </div>
+                {invites.length === 0 ? (
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No invite codes yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {invites.map((inv) => (
+                      <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                        <span className="font-mono text-sm tracking-wider flex-1" style={{ color: "var(--color-primary)" }}>{inv.code}</span>
+                        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                          {inv.use_count} uses{inv.max_uses ? ` / ${inv.max_uses}` : ""}
+                        </span>
+                        <button onClick={() => copyCode(inv.code)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}>
+                          {copied === inv.code ? "Copied!" : "Copy"}
+                        </button>
+                        <button onClick={() => handleRevokeInvite(inv.id)} className="text-xs px-1" style={{ color: "var(--color-text-muted)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
 import { OrbitalBackground } from "../components/OrbitalBackground";
@@ -31,32 +31,18 @@ interface Session {
   title: string;
 }
 
-const DEMO_PROJECTS: Project[] = [
-  { id: "proj-crm", name: "CRM", description: "Customer Relationship Management system", opencode_port: 4096, active_users: 1, last_activity: new Date().toISOString() },
-  { id: "proj-helpdesk", name: "Helpdesk", description: "IT Help Desk ticketing system", opencode_port: 4097, active_users: 0, last_activity: null },
-  { id: "proj-infra", name: "Infrastructure", description: "Infrastructure automation and monitoring", opencode_port: 4098, active_users: 2, last_activity: new Date(Date.now() - 3600000).toISOString() },
-];
-
-const DEMO_ACTIVITY: ActivityEntry[] = [
-  { id: 1, event_type: "file.edited", file_path: "src/auth/session.ts", user_display_name: "Hayden", project_name: "CRM", created_at: new Date().toISOString() },
-  { id: 2, event_type: "bash.ran", user_display_name: "Alice", project_name: "Infrastructure", created_at: new Date(Date.now() - 120000).toISOString() },
-  { id: 3, event_type: "session.created", user_display_name: "Bob", project_name: "CRM", created_at: new Date(Date.now() - 300000).toISOString() },
-  { id: 4, event_type: "file.edited", file_path: "lib/api/routes.ts", user_display_name: "Hayden", project_name: "CRM", created_at: new Date(Date.now() - 600000).toISOString() },
-  { id: 5, event_type: "file.lock.acquired", file_path: "deploy.yml", user_display_name: "Alice", project_name: "Infrastructure", created_at: new Date(Date.now() - 900000).toISOString() },
-];
-
-const DEMO_SESSIONS: Session[] = [
-  { id: "ses-1", project_name: "CRM", user_display_name: "Hayden", status: "thinking", title: "Refactoring auth module" },
-  { id: "ses-2", project_name: "Infrastructure", user_display_name: "Alice", status: "idle", title: "Updating deploy pipeline" },
-];
-
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProject, setNewProject] = useState({ name: "", git_url: "", description: "" });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user, logout, activeTeam } = useAuthStore();
   const broker = useBroker();
 
   useEffect(() => {
@@ -65,11 +51,8 @@ export function ProjectsPage() {
       broker.getRecentActivity(30).then(setActivity),
       broker.getSessions().then(setSessions),
     ])
-      .catch(() => {
-        // Broker not available — use demo data
-        setProjects(DEMO_PROJECTS);
-        setActivity(DEMO_ACTIVITY);
-        setSessions(DEMO_SESSIONS);
+      .catch((err) => {
+        setError(err.message || "Failed to connect to server");
       })
       .finally(() => setLoading(false));
 
@@ -112,10 +95,137 @@ export function ProjectsPage() {
     action: () => navigate(`/project/${p.id}`),
   }));
 
+  async function handleCreateProject(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newProject.name) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      await broker.createProject({
+        name: newProject.name,
+        git_url: newProject.git_url || undefined,
+        description: newProject.description || undefined,
+      });
+      setShowNewProject(false);
+      setNewProject({ name: "", git_url: "", description: "" });
+      broker.getProjects().then(setProjects).catch(() => {});
+    } catch (err: any) {
+      setCreateError(err.message || "Failed to create project");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleDeleteProject(e: React.MouseEvent, projectId: string) {
+    e.stopPropagation();
+    if (!confirm("Delete this project from the dashboard? (Files on disk are kept)")) return;
+    try {
+      await broker.deleteProject(projectId);
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    } catch {}
+  }
+
   return (
     <div className="min-h-screen relative" style={{ background: "var(--color-bg-base)" }}>
       <OrbitalBackground />
       <CommandPalette items={commandItems} />
+
+      {/* New Project Modal */}
+      {showNewProject && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: 50, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={() => setShowNewProject(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl p-6 shadow-2xl"
+            style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border-bright)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-sm font-semibold mb-4" style={{ color: "var(--color-text-primary)" }}>
+              New Project
+            </h2>
+            <form onSubmit={handleCreateProject} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                  Project Name *
+                </label>
+                <input
+                  type="text"
+                  value={newProject.name}
+                  onChange={(e) => setNewProject((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="My Project"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                  Git Repository URL
+                </label>
+                <input
+                  type="text"
+                  value={newProject.git_url}
+                  onChange={(e) => setNewProject((p) => ({ ...p, git_url: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="https://github.com/user/repo.git (optional)"
+                />
+                <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+                  Leave empty to create a blank project
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={newProject.description}
+                  onChange={(e) => setNewProject((p) => ({ ...p, description: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="What is this project?"
+                />
+              </div>
+
+              {createError && (
+                <p className="text-sm" style={{ color: "var(--color-error)" }}>{createError}</p>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewProject(false)}
+                  className="flex-1 py-2 px-4 rounded-lg text-sm"
+                  style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !newProject.name}
+                  className="flex-1 py-2 px-4 rounded-lg text-sm font-medium"
+                  style={{
+                    background: creating || !newProject.name ? "var(--color-bg-hover)" : "var(--color-primary)",
+                    color: creating || !newProject.name ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                    cursor: creating || !newProject.name ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {creating ? "Creating..." : "Create Project"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <header
@@ -126,12 +236,21 @@ export function ProjectsPage() {
           <h1 className="text-lg font-semibold" style={{ color: "var(--color-primary)" }}>
             Orbit AI
           </h1>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full font-mono"
-            style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}
-          >
-            v0.1.0
-          </span>
+          {activeTeam && (
+            <>
+              <span style={{ color: "var(--color-text-muted)" }}>/</span>
+              <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam.name}</span>
+              <Link
+                to={`/teams/${activeTeam.id}/settings`}
+                className="text-xs px-1.5 py-0.5 rounded transition-colors"
+                style={{ color: "var(--color-text-muted)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+              >
+                settings
+              </Link>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <kbd
@@ -145,6 +264,15 @@ export function ProjectsPage() {
             <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
             <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>{user?.display_name}</span>
           </div>
+          <button
+            onClick={() => navigate("/teams")}
+            className="text-xs transition-colors"
+            style={{ color: "var(--color-text-muted)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-text-primary)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+          >
+            Switch team
+          </button>
           <button
             onClick={logout}
             className="text-xs transition-colors"
@@ -160,6 +288,16 @@ export function ProjectsPage() {
       <div className="flex relative" style={{ zIndex: 1 }}>
         {/* Main content */}
         <main className="flex-1 p-6 max-w-5xl mx-auto">
+          {/* Connection error */}
+          {error && (
+            <div
+              className="mb-6 rounded-lg px-4 py-3 text-sm"
+              style={{ background: "var(--color-error-muted)", color: "var(--color-error)", border: "1px solid rgba(224, 108, 117, 0.2)" }}
+            >
+              {error} — Make sure the broker server is running.
+            </div>
+          )}
+
           {/* Stats bar */}
           <div className="grid grid-cols-4 gap-3 mb-6">
             {[
@@ -220,9 +358,20 @@ export function ProjectsPage() {
             <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
               Projects
             </h2>
-            <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
-              {projects.length} total
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
+                {projects.length} total
+              </span>
+              <button
+                onClick={() => setShowNewProject(true)}
+                className="text-xs px-3 py-1.5 rounded-lg transition-all font-medium"
+                style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-primary-hover)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-primary)")}
+              >
+                + New Project
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -234,6 +383,16 @@ export function ProjectsPage() {
                   style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)", height: "140px" }}
                 />
               ))}
+            </div>
+          ) : projects.length === 0 ? (
+            <div
+              className="rounded-lg p-8 text-center"
+              style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+            >
+              <p className="text-sm mb-2" style={{ color: "var(--color-text-secondary)" }}>No projects yet</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Projects will appear here once they are added to the server.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -266,6 +425,15 @@ export function ProjectsPage() {
                           {project.active_users}
                         </span>
                       )}
+                      <span
+                        onClick={(e) => handleDeleteProject(e, project.id)}
+                        className="text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer px-1"
+                        style={{ color: "var(--color-text-muted)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+                      >
+                        x
+                      </span>
                     </div>
                   </div>
 
