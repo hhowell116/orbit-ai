@@ -2,8 +2,12 @@ node_modules/
 dist/
 .bun/
 *.db
+*.db-shm
+*.db-wal
 bun.lock
 package-lock.json
 cloudflared.exe
 .env
+.env.production
 *.log
+.firebase/

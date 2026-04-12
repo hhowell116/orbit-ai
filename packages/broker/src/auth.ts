@@ -11,18 +11,24 @@ export interface JWTPayload {
   sub: string; // user id
   username: string;
   display_name: string;
+  team_id?: string;
+  team_role?: string; // 'owner' | 'admin' | 'member'
 }
 
-export async function createToken(user: {
-  id: string;
-  username: string;
-  display_name: string;
-}): Promise<string> {
-  return new SignJWT({
+export async function createToken(
+  user: { id: string; username: string; display_name: string },
+  team?: { id: string; role: string }
+): Promise<string> {
+  const payload: Record<string, string> = {
     sub: user.id,
     username: user.username,
     display_name: user.display_name,
-  })
+  };
+  if (team) {
+    payload.team_id = team.id;
+    payload.team_role = team.role;
+  }
+  return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(JWT_EXPIRY)
@@ -55,4 +61,13 @@ export async function authMiddleware(c: Context, next: Next) {
   } catch {
     return c.json({ error: "Invalid or expired token" }, 401);
   }
+}
+
+// Middleware: requires an active team in the JWT
+export async function requireTeam(c: Context, next: Next) {
+  const user = c.get("user") as JWTPayload;
+  if (!user.team_id) {
+    return c.json({ error: "No active team selected" }, 403);
+  }
+  await next();
 }

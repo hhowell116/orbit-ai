@@ -1,8 +1,15 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
+import { stream } from "hono/streaming";
+import { serveStatic } from "hono/bun";
 import { db } from "./db";
-import { authMiddleware, createToken, type JWTPayload } from "./auth";
+import { authMiddleware, requireTeam, createToken, type JWTPayload } from "./auth";
+import { join } from "path";
+import { randomBytes } from "crypto";
+import Anthropic from "@anthropic-ai/sdk";
+
+const DASHBOARD_DIR = join(import.meta.dir, "..", "..", "dashboard", "dist");
 
 const app = new Hono();
 
@@ -27,11 +34,126 @@ function broadcast(event: string, data: unknown) {
   }
 }
 
+function generateInviteCode(): string {
+  const bytes = randomBytes(4).toString("hex").toUpperCase();
+  return `${bytes.slice(0, 4)}-${bytes.slice(4)}`;
+}
+
+function generateId(prefix: string, name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `${prefix}-${slug}-${randomBytes(3).toString("hex")}`;
+}
+
 // --- Health check ---
 app.get("/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
 
+// =============================================
+// API ROUTES
+// =============================================
+const api = new Hono();
+
 // --- Auth routes (no middleware) ---
-app.post("/auth/login", async (c) => {
+
+api.post("/auth/signup", async (c) => {
+  const { username, email, password, display_name } = await c.req.json<{
+    username: string;
+    email?: string;
+    password: string;
+    display_name: string;
+  }>();
+
+  if (!username || !password || !display_name) {
+    return c.json({ error: "username, password, and display_name are required" }, 400);
+  }
+
+  // Check if username or email already exists
+  const existing = db.query("SELECT id FROM users WHERE username = ?").get(username);
+  if (existing) {
+    return c.json({ error: "Username already taken" }, 409);
+  }
+  if (email) {
+    const existingEmail = db.query("SELECT id FROM users WHERE email = ?").get(email);
+    if (existingEmail) {
+      return c.json({ error: "Email already registered" }, 409);
+    }
+  }
+
+  const id = `user-${randomBytes(6).toString("hex")}`;
+  const hash = await Bun.password.hash(password, { algorithm: "bcrypt", cost: 12 });
+
+  db.run(
+    "INSERT INTO users (id, username, display_name, password_hash, email) VALUES (?, ?, ?, ?, ?)",
+    [id, username, display_name, hash, email || null]
+  );
+
+  const user = { id, username, display_name };
+  const token = await createToken(user);
+  return c.json({ token, user, teams: [] }, 201);
+});
+
+api.post("/auth/google", async (c) => {
+  const { id_token } = await c.req.json<{ id_token: string }>();
+
+  if (!id_token) return c.json({ error: "id_token is required" }, 400);
+
+  // Verify the Firebase ID token using Google's public keys
+  const { createRemoteJWKSet, jwtVerify } = await import("jose");
+  const GOOGLE_JWKS = createRemoteJWKSet(
+    new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
+  );
+
+  let payload: any;
+  try {
+    const result = await jwtVerify(id_token, GOOGLE_JWKS, {
+      issuer: "https://securetoken.google.com/orbitai-dashboard",
+      audience: "orbitai-dashboard",
+    });
+    payload = result.payload;
+  } catch {
+    return c.json({ error: "Invalid or expired Google token" }, 401);
+  }
+
+  const googleEmail = payload.email as string;
+  const googleName = payload.name as string || googleEmail.split("@")[0];
+  const googleUid = payload.sub as string;
+
+  if (!googleEmail) return c.json({ error: "No email in Google token" }, 400);
+
+  // Find or create user by email
+  let user = db
+    .query("SELECT id, username, display_name FROM users WHERE email = ?")
+    .get(googleEmail) as { id: string; username: string; display_name: string } | null;
+
+  if (!user) {
+    // Create new user from Google profile
+    const id = `user-${randomBytes(6).toString("hex")}`;
+    const username = googleEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "") + randomBytes(2).toString("hex");
+    const hash = await Bun.password.hash(googleUid, { algorithm: "bcrypt", cost: 12 });
+
+    db.run(
+      "INSERT INTO users (id, username, display_name, password_hash, email) VALUES (?, ?, ?, ?, ?)",
+      [id, username, googleName, hash, googleEmail]
+    );
+
+    user = { id, username, display_name: googleName };
+  }
+
+  // Get user's teams
+  const teams = db
+    .query(`
+      SELECT t.id, t.name, t.slug, tm.role
+      FROM teams t
+      JOIN team_members tm ON tm.team_id = t.id
+      WHERE tm.user_id = ?
+      ORDER BY t.name
+    `)
+    .all(user.id);
+
+  const token = await createToken(user);
+  return c.json({ token, user, teams });
+});
+
+api.post("/auth/login", async (c) => {
   const { username, password } = await c.req.json<{ username: string; password: string }>();
 
   const user = db
@@ -42,68 +164,406 @@ app.post("/auth/login", async (c) => {
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
-  // For MVP: plain text password comparison
-  // TODO: Switch to bcrypt with Bun.password.verify() before production
   const valid = await Bun.password.verify(password, user.password_hash);
   if (!valid) {
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
+  // Get user's teams
+  const teams = db
+    .query(`
+      SELECT t.id, t.name, t.slug, tm.role
+      FROM teams t
+      JOIN team_members tm ON tm.team_id = t.id
+      WHERE tm.user_id = ?
+      ORDER BY t.name
+    `)
+    .all(user.id);
+
   const token = await createToken(user);
-  return c.json({ token, user: { id: user.id, username: user.username, display_name: user.display_name } });
+  return c.json({
+    token,
+    user: { id: user.id, username: user.username, display_name: user.display_name },
+    teams,
+  });
 });
 
-// --- Protected routes ---
-const api = new Hono();
-api.use("*", authMiddleware);
+// --- Auth routes (require auth, no team needed) ---
 
-// -- Auth info --
-api.get("/auth/me", (c) => {
+api.get("/auth/me", authMiddleware, (c) => {
   const user = c.get("user") as JWTPayload;
   return c.json(user);
 });
 
-// -- Users --
-api.get("/users", (c) => {
+api.get("/auth/teams", authMiddleware, (c) => {
+  const user = c.get("user") as JWTPayload;
+  const teams = db
+    .query(`
+      SELECT t.id, t.name, t.slug, tm.role
+      FROM teams t
+      JOIN team_members tm ON tm.team_id = t.id
+      WHERE tm.user_id = ?
+      ORDER BY t.name
+    `)
+    .all(user.sub);
+  return c.json(teams);
+});
+
+api.post("/auth/select-team", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { team_id } = await c.req.json<{ team_id: string }>();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(team_id, user.sub) as { role: string } | null;
+
+  if (!membership) {
+    return c.json({ error: "You are not a member of this team" }, 403);
+  }
+
+  const team = db.query("SELECT id, name, slug FROM teams WHERE id = ?").get(team_id) as { id: string; name: string; slug: string } | null;
+  if (!team) {
+    return c.json({ error: "Team not found" }, 404);
+  }
+
+  const token = await createToken(
+    { id: user.sub, username: user.username, display_name: user.display_name },
+    { id: team_id, role: membership.role }
+  );
+
+  return c.json({ token, team: { ...team, role: membership.role } });
+});
+
+// --- Team routes (require auth, no team needed) ---
+
+api.post("/teams", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { name } = await c.req.json<{ name: string }>();
+
+  if (!name) return c.json({ error: "Team name is required" }, 400);
+
+  const id = generateId("team", name);
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  db.run(
+    "INSERT INTO teams (id, name, slug, owner_id) VALUES (?, ?, ?, ?)",
+    [id, name, slug, user.sub]
+  );
+
+  db.run(
+    "INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
+    [id, user.sub]
+  );
+
+  // Auto-generate first invite code
+  const code = generateInviteCode();
+  db.run(
+    "INSERT INTO team_invites (team_id, code, created_by) VALUES (?, ?, ?)",
+    [id, code, user.sub]
+  );
+
+  const team = db.query("SELECT * FROM teams WHERE id = ?").get(id);
+  return c.json({ team, invite_code: code }, 201);
+});
+
+api.post("/teams/join", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { code } = await c.req.json<{ code: string }>();
+
+  if (!code) return c.json({ error: "Invite code is required" }, 400);
+
+  const invite = db
+    .query("SELECT * FROM team_invites WHERE code = ?")
+    .get(code.toUpperCase().trim()) as {
+      id: number; team_id: string; max_uses: number | null; use_count: number; expires_at: string | null;
+    } | null;
+
+  if (!invite) {
+    return c.json({ error: "Invalid invite code" }, 404);
+  }
+
+  if (invite.max_uses !== null && invite.use_count >= invite.max_uses) {
+    return c.json({ error: "Invite code has reached its maximum uses" }, 410);
+  }
+
+  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    return c.json({ error: "Invite code has expired" }, 410);
+  }
+
+  // Check if already a member
+  const existing = db
+    .query("SELECT id FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(invite.team_id, user.sub);
+
+  if (existing) {
+    return c.json({ error: "You are already a member of this team" }, 409);
+  }
+
+  db.run(
+    "INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')",
+    [invite.team_id, user.sub]
+  );
+
+  db.run("UPDATE team_invites SET use_count = use_count + 1 WHERE id = ?", [invite.id]);
+
+  const team = db
+    .query("SELECT t.id, t.name, t.slug FROM teams t WHERE t.id = ?")
+    .get(invite.team_id);
+
+  return c.json({ team, role: "member" }, 201);
+});
+
+// --- Team management routes (require auth + team) ---
+
+api.get("/teams/:id", authMiddleware, (c) => {
+  const { id } = c.req.param();
+  const team = db.query("SELECT id, name, slug, owner_id, created_at, anthropic_api_key FROM teams WHERE id = ?").get(id) as any;
+  if (!team) return c.json({ error: "Team not found" }, 404);
+  // Don't expose the full key, just whether it's set
+  team.has_api_key = !!team.anthropic_api_key;
+  delete team.anthropic_api_key;
+  return c.json(team);
+});
+
+api.get("/teams/:id/members", authMiddleware, (c) => {
+  const { id } = c.req.param();
+  const members = db
+    .query(`
+      SELECT u.id, u.username, u.display_name, u.last_seen, tm.role, tm.joined_at
+      FROM team_members tm
+      JOIN users u ON u.id = tm.user_id
+      WHERE tm.team_id = ?
+      ORDER BY tm.role, u.display_name
+    `)
+    .all(id);
+  return c.json(members);
+});
+
+api.patch("/teams/:id", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const { name, anthropic_api_key } = await c.req.json<{ name?: string; anthropic_api_key?: string }>();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+    return c.json({ error: "Only team owners and admins can update the team" }, 403);
+  }
+
+  if (name) db.run("UPDATE teams SET name = ? WHERE id = ?", [name, id]);
+  if (anthropic_api_key !== undefined) {
+    db.run("UPDATE teams SET anthropic_api_key = ? WHERE id = ?", [anthropic_api_key, id]);
+  }
+
+  const team = db.query("SELECT * FROM teams WHERE id = ?").get(id);
+  return c.json(team);
+});
+
+api.delete("/teams/:id/members/:userId", authMiddleware, (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id, userId } = c.req.param();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  // Allow self-removal or owner/admin removal
+  if (userId !== user.sub) {
+    if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+      return c.json({ error: "Only team owners and admins can remove members" }, 403);
+    }
+  }
+
+  db.run("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", [id, userId]);
+  return c.json({ ok: true });
+});
+
+api.patch("/teams/:id/members/:userId", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id, userId } = c.req.param();
+  const { role } = await c.req.json<{ role: string }>();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || membership.role !== "owner") {
+    return c.json({ error: "Only the team owner can change roles" }, 403);
+  }
+
+  db.run("UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?", [role, id, userId]);
+  return c.json({ ok: true });
+});
+
+// --- Invite routes ---
+
+api.post("/teams/:id/invites", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const body = await c.req.json<{ max_uses?: number; expires_at?: string }>().catch(() => ({}));
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || membership.role === "member") {
+    return c.json({ error: "Only team owners and admins can create invites" }, 403);
+  }
+
+  const code = generateInviteCode();
+  db.run(
+    "INSERT INTO team_invites (team_id, code, created_by, max_uses, expires_at) VALUES (?, ?, ?, ?, ?)",
+    [id, code, user.sub, body.max_uses || null, body.expires_at || null]
+  );
+
+  const invite = db.query("SELECT * FROM team_invites WHERE code = ?").get(code);
+  return c.json(invite, 201);
+});
+
+api.get("/teams/:id/invites", authMiddleware, (c) => {
+  const { id } = c.req.param();
+  const invites = db
+    .query("SELECT * FROM team_invites WHERE team_id = ? ORDER BY created_at DESC")
+    .all(id);
+  return c.json(invites);
+});
+
+api.delete("/teams/:id/invites/:inviteId", authMiddleware, (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id, inviteId } = c.req.param();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || membership.role === "member") {
+    return c.json({ error: "Only team owners and admins can revoke invites" }, 403);
+  }
+
+  db.run("DELETE FROM team_invites WHERE id = ? AND team_id = ?", [inviteId, id]);
+  return c.json({ ok: true });
+});
+
+// =============================================
+// TEAM-SCOPED DATA ROUTES (require auth + team)
+// =============================================
+const teamApi = new Hono();
+teamApi.use("*", authMiddleware);
+teamApi.use("*", requireTeam);
+
+// -- Users (scoped to team) --
+teamApi.get("/users", (c) => {
+  const user = c.get("user") as JWTPayload;
   const users = db
-    .query("SELECT id, username, display_name, last_seen FROM users ORDER BY display_name")
-    .all();
+    .query(`
+      SELECT u.id, u.username, u.display_name, u.last_seen, tm.role
+      FROM users u
+      JOIN team_members tm ON tm.user_id = u.id
+      WHERE tm.team_id = ?
+      ORDER BY u.display_name
+    `)
+    .all(user.team_id);
   return c.json(users);
 });
 
-api.get("/users/:id/activity", (c) => {
+teamApi.get("/users/:id/activity", (c) => {
+  const user = c.get("user") as JWTPayload;
   const { id } = c.req.param();
   const limit = Number(c.req.query("limit") || "50");
   const activity = db
-    .query(
-      "SELECT * FROM activity WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
-    )
-    .all(id, limit);
+    .query(`
+      SELECT a.* FROM activity a
+      JOIN projects p ON p.id = a.project_id
+      WHERE a.user_id = ? AND p.team_id = ?
+      ORDER BY a.created_at DESC LIMIT ?
+    `)
+    .all(id, user.team_id, limit);
   return c.json(activity);
 });
 
-// -- Projects --
-api.get("/projects", (c) => {
+// -- Projects (scoped to team) --
+teamApi.get("/projects", (c) => {
+  const user = c.get("user") as JWTPayload;
   const projects = db
     .query(`
       SELECT p.*,
         (SELECT COUNT(DISTINCT s.user_id) FROM sessions s WHERE s.project_id = p.id AND s.status != 'ended') as active_users,
         (SELECT MAX(a.created_at) FROM activity a WHERE a.project_id = p.id) as last_activity
       FROM projects p
+      WHERE p.team_id = ?
       ORDER BY p.name
     `)
-    .all();
+    .all(user.team_id);
   return c.json(projects);
 });
 
-api.get("/projects/:id", (c) => {
-  const { id } = c.req.param();
+teamApi.post("/projects", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { name, git_url, description } = await c.req.json<{
+    name: string;
+    git_url?: string;
+    description?: string;
+  }>();
+
+  if (!name) return c.json({ error: "Project name is required" }, 400);
+
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const id = `proj-${slug}-${randomBytes(3).toString("hex")}`;
+  const projectsDir = join(import.meta.dir, "..", "..", "..", "projects");
+  const projectPath = join(projectsDir, slug);
+
+  const maxPort = db.query("SELECT MAX(opencode_port) as max_port FROM projects").get() as { max_port: number | null };
+  const opencode_port = (maxPort?.max_port || 4095) + 1;
+
+  const { mkdirSync, existsSync } = await import("fs");
+  if (!existsSync(projectsDir)) mkdirSync(projectsDir, { recursive: true });
+  if (existsSync(projectPath)) return c.json({ error: "Project directory already exists" }, 409);
+
+  if (git_url) {
+    const proc = Bun.spawnSync(["git", "clone", "--depth", "1", git_url, projectPath]);
+    if (proc.exitCode !== 0) {
+      return c.json({ error: `Git clone failed: ${proc.stderr.toString().trim()}` }, 400);
+    }
+  } else {
+    mkdirSync(projectPath, { recursive: true });
+  }
+
+  db.run(
+    "INSERT INTO projects (id, name, path, opencode_port, description, team_id) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, name, projectPath, opencode_port, description || null, user.team_id]
+  );
+
   const project = db.query("SELECT * FROM projects WHERE id = ?").get(id);
+  broadcast("project.created", project);
+  return c.json(project, 201);
+});
+
+teamApi.get("/projects/:id", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id);
   if (!project) return c.json({ error: "Project not found" }, 404);
   return c.json(project);
 });
 
-api.get("/projects/:id/users", (c) => {
+teamApi.delete("/projects/:id", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  db.run("DELETE FROM file_locks WHERE project_id = ?", [id]);
+  db.run("DELETE FROM activity WHERE project_id = ?", [id]);
+  db.run("DELETE FROM sessions WHERE project_id = ?", [id]);
+  db.run("DELETE FROM projects WHERE id = ?", [id]);
+
+  broadcast("project.deleted", { id });
+  return c.json({ ok: true });
+});
+
+teamApi.get("/projects/:id/users", (c) => {
   const { id } = c.req.param();
   const users = db
     .query(`
@@ -117,7 +577,7 @@ api.get("/projects/:id/users", (c) => {
   return c.json(users);
 });
 
-api.get("/projects/:id/activity", (c) => {
+teamApi.get("/projects/:id/activity", (c) => {
   const { id } = c.req.param();
   const limit = Number(c.req.query("limit") || "50");
   const activity = db
@@ -126,22 +586,23 @@ api.get("/projects/:id/activity", (c) => {
   return c.json(activity);
 });
 
-// -- Sessions --
-api.get("/sessions", (c) => {
+// -- Sessions (scoped to team via projects) --
+teamApi.get("/sessions", (c) => {
+  const user = c.get("user") as JWTPayload;
   const sessions = db
     .query(`
       SELECT s.*, u.display_name as user_display_name, p.name as project_name
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       JOIN projects p ON p.id = s.project_id
-      WHERE s.status != 'ended'
+      WHERE s.status != 'ended' AND p.team_id = ?
       ORDER BY s.updated_at DESC
     `)
-    .all();
+    .all(user.team_id);
   return c.json(sessions);
 });
 
-api.post("/sessions", async (c) => {
+teamApi.post("/sessions", async (c) => {
   const user = c.get("user") as JWTPayload;
   const { project_id, session_id, title } = await c.req.json<{
     project_id: string;
@@ -159,7 +620,7 @@ api.post("/sessions", async (c) => {
   return c.json(session, 201);
 });
 
-api.patch("/sessions/:id", async (c) => {
+teamApi.patch("/sessions/:id", async (c) => {
   const { id } = c.req.param();
   const { status, title } = await c.req.json<{ status?: string; title?: string }>();
 
@@ -175,30 +636,95 @@ api.patch("/sessions/:id", async (c) => {
   return c.json(session);
 });
 
-api.delete("/sessions/:id", (c) => {
+teamApi.delete("/sessions/:id", (c) => {
   const { id } = c.req.param();
   db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
-  // Release file locks for this session
   db.run("DELETE FROM file_locks WHERE session_id = ?", [id]);
   broadcast("session.ended", { id });
   return c.json({ ok: true });
 });
 
-// -- File Locks --
-api.get("/locks", (c) => {
+// -- Chat (Claude via Anthropic SDK) --
+teamApi.get("/chat/:sessionId/messages", (c) => {
+  const { sessionId } = c.req.param();
+  const messages = db
+    .query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
+    .all(sessionId);
+  return c.json(messages);
+});
+
+teamApi.post("/chat/:sessionId", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { sessionId } = c.req.param();
+  const { message } = await c.req.json<{ message: string }>();
+
+  if (!message) return c.json({ error: "message is required" }, 400);
+
+  // Get team's API key
+  const team = db.query("SELECT anthropic_api_key FROM teams WHERE id = ?").get(user.team_id) as { anthropic_api_key: string | null } | null;
+
+  if (!team?.anthropic_api_key) {
+    return c.json({ error: "No Anthropic API key configured. Go to Team Settings to connect Claude." }, 400);
+  }
+
+  // Save user message
+  db.run("INSERT INTO messages (session_id, role, content) VALUES (?, 'user', ?)", [sessionId, message]);
+
+  // Get conversation history
+  const history = db
+    .query("SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC")
+    .all(sessionId) as { role: string; content: string }[];
+
+  const anthropic = new Anthropic({ apiKey: team.anthropic_api_key });
+
+  // Stream the response
+  return stream(c, async (s) => {
+    try {
+      const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 8192,
+        messages: history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        stream: true,
+      });
+
+      let fullResponse = "";
+
+      for await (const event of response) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          fullResponse += event.delta.text;
+          await s.write(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`);
+        }
+      }
+
+      // Save assistant response
+      if (fullResponse) {
+        db.run("INSERT INTO messages (session_id, role, content) VALUES (?, 'assistant', ?)", [sessionId, fullResponse]);
+      }
+
+      await s.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+    } catch (err: any) {
+      await s.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Claude API error" })}\n\n`);
+    }
+  });
+});
+
+// -- File Locks (scoped to team via projects) --
+teamApi.get("/locks", (c) => {
+  const user = c.get("user") as JWTPayload;
   const locks = db
     .query(`
       SELECT fl.*, u.display_name as user_display_name, p.name as project_name
       FROM file_locks fl
       JOIN users u ON u.id = fl.user_id
       JOIN projects p ON p.id = fl.project_id
+      WHERE p.team_id = ?
       ORDER BY fl.locked_at DESC
     `)
-    .all();
+    .all(user.team_id);
   return c.json(locks);
 });
 
-api.get("/locks/:projectId", (c) => {
+teamApi.get("/locks/:projectId", (c) => {
   const { projectId } = c.req.param();
   const locks = db
     .query(`
@@ -212,7 +738,7 @@ api.get("/locks/:projectId", (c) => {
   return c.json(locks);
 });
 
-api.post("/locks", async (c) => {
+teamApi.post("/locks", async (c) => {
   const { project_id, file_path, user_id, session_id, line_start, line_end } = await c.req.json<{
     project_id: string;
     file_path: string;
@@ -222,16 +748,12 @@ api.post("/locks", async (c) => {
     line_end?: number;
   }>();
 
-  // Check if already locked by someone else
   const existing = db
     .query("SELECT * FROM file_locks WHERE project_id = ? AND file_path = ?")
-    .get(project_id, file_path) as { user_id: string; user_display_name?: string } | null;
+    .get(project_id, file_path) as { user_id: string } | null;
 
   if (existing && existing.user_id !== user_id) {
-    return c.json(
-      { error: "File is locked by another user", lock: existing },
-      409
-    );
+    return c.json({ error: "File is locked by another user", lock: existing }, 409);
   }
 
   db.run(
@@ -248,7 +770,7 @@ api.post("/locks", async (c) => {
   return c.json(lock, 201);
 });
 
-api.delete("/locks/:id", (c) => {
+teamApi.delete("/locks/:id", (c) => {
   const { id } = c.req.param();
   const lock = db.query("SELECT * FROM file_locks WHERE id = ?").get(id);
   db.run("DELETE FROM file_locks WHERE id = ?", [id]);
@@ -256,8 +778,7 @@ api.delete("/locks/:id", (c) => {
   return c.json({ ok: true });
 });
 
-// Release all locks for a session (used by plugin on session.idle)
-api.delete("/locks/session/:sessionId", (c) => {
+teamApi.delete("/locks/session/:sessionId", (c) => {
   const { sessionId } = c.req.param();
   const locks = db.query("SELECT * FROM file_locks WHERE session_id = ?").all(sessionId);
   db.run("DELETE FROM file_locks WHERE session_id = ?", [sessionId]);
@@ -267,8 +788,9 @@ api.delete("/locks/session/:sessionId", (c) => {
   return c.json({ ok: true, released: locks.length });
 });
 
-// -- Activity --
-api.get("/activity/recent", (c) => {
+// -- Activity (scoped to team) --
+teamApi.get("/activity/recent", (c) => {
+  const user = c.get("user") as JWTPayload;
   const limit = Number(c.req.query("limit") || "50");
   const activity = db
     .query(`
@@ -276,14 +798,15 @@ api.get("/activity/recent", (c) => {
       FROM activity a
       JOIN users u ON u.id = a.user_id
       JOIN projects p ON p.id = a.project_id
+      WHERE p.team_id = ?
       ORDER BY a.created_at DESC
       LIMIT ?
     `)
-    .all(limit);
+    .all(user.team_id, limit);
   return c.json(activity);
 });
 
-api.post("/activity", async (c) => {
+teamApi.post("/activity", async (c) => {
   const { project_id, user_id, session_id, event_type, file_path, line_start, line_end, detail } =
     await c.req.json<{
       project_id: string;
@@ -308,7 +831,7 @@ api.post("/activity", async (c) => {
 });
 
 // -- SSE Stream --
-api.get("/activity/stream", (c) => {
+teamApi.get("/activity/stream", (c) => {
   return streamSSE(c, async (stream) => {
     const client: SSEClient = {
       send: (event, data) => {
@@ -320,7 +843,6 @@ api.get("/activity/stream", (c) => {
     };
     sseClients.add(client);
 
-    // Send heartbeat every 30s to keep connection alive
     const heartbeat = setInterval(() => {
       try {
         stream.writeSSE({ event: "heartbeat", data: new Date().toISOString() });
@@ -330,19 +852,18 @@ api.get("/activity/stream", (c) => {
       }
     }, 30_000);
 
-    // Keep stream open until client disconnects
     stream.onAbort(() => {
       clearInterval(heartbeat);
       sseClients.delete(client);
     });
 
-    // Block to keep stream open
     await new Promise(() => {});
   });
 });
 
 // -- Token Usage --
-api.get("/usage", (c) => {
+teamApi.get("/usage", (c) => {
+  const user = c.get("user") as JWTPayload;
   const usage = db
     .query(`
       SELECT u.display_name, p.name as project_name,
@@ -352,15 +873,23 @@ api.get("/usage", (c) => {
       FROM token_usage tu
       JOIN users u ON u.id = tu.user_id
       JOIN projects p ON p.id = tu.project_id
+      WHERE p.team_id = ?
       GROUP BY tu.user_id, tu.project_id, tu.model
       ORDER BY total_input DESC
     `)
-    .all();
+    .all(user.team_id);
   return c.json(usage);
 });
 
-// Mount protected routes under /api
-app.route("/", api);
+// =============================================
+// MOUNT ROUTES
+// =============================================
+app.route("/api", api);
+app.route("/api", teamApi);
+
+// --- Serve dashboard static files ---
+app.use("*", serveStatic({ root: DASHBOARD_DIR }));
+app.get("*", serveStatic({ root: DASHBOARD_DIR, path: "index.html" }));
 
 // --- Start server ---
 const PORT = Number(process.env.BROKER_PORT || "5000");

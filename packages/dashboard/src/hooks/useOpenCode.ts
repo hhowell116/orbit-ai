@@ -47,7 +47,7 @@ export function useOpenCode(projectName: string) {
 
   const sendMessage = useCallback(
     async (sessionId: string, text: string) => {
-      const { data } = await client.session.chat({
+      const { data } = await client.session.prompt({
         path: { id: sessionId },
         body: {
           parts: [{ type: "text", text }],
