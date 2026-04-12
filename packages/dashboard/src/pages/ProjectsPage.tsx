@@ -265,6 +265,18 @@ export function ProjectsPage() {
             <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>{user?.display_name}</span>
           </div>
           <button
+            onClick={() => navigate("/connections")}
+            className="text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
+            style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}
+          >
+            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
+              <path d="M1.5 3A1.5 1.5 0 0 0 0 4.5v1A1.5 1.5 0 0 0 1.5 7h1A1.5 1.5 0 0 0 4 5.5v-1A1.5 1.5 0 0 0 2.5 3h-1ZM5 4.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5ZM5.5 10a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9ZM12 4.5A1.5 1.5 0 0 1 13.5 3h1A1.5 1.5 0 0 1 16 4.5v1A1.5 1.5 0 0 1 14.5 7h-1A1.5 1.5 0 0 1 12 5.5v-1ZM0 10.5A1.5 1.5 0 0 1 1.5 9h1A1.5 1.5 0 0 1 4 10.5v1A1.5 1.5 0 0 1 2.5 13h-1A1.5 1.5 0 0 1 0 11.5v-1Z"/>
+            </svg>
+            Connections
+          </button>
+          <button
             onClick={() => navigate("/teams")}
             className="text-xs transition-colors"
             style={{ color: "var(--color-text-muted)" }}

@@ -1,6 +1,9 @@
 import { useAuthStore } from "../stores/authStore";
 
-const BROKER_URL = "/api";
+// Use tunnel URL in production, relative path in dev
+const BROKER_URL = window.location.hostname === "localhost"
+  ? "/api"
+  : "https://spaces-run-viii-relying.trycloudflare.com/api";
 
 async function brokerFetch(path: string, options: RequestInit = {}) {
   const token = useAuthStore.getState().token;
@@ -21,6 +24,9 @@ async function brokerFetch(path: string, options: RequestInit = {}) {
 
 export function useBroker() {
   return {
+    // Raw fetch (for non-standard endpoints like OpenCode proxy)
+    rawFetch: (path: string, options?: RequestInit) => brokerFetch(path, options || {}),
+
     // Auth
     login: (username: string, password: string) =>
       brokerFetch("/auth/login", {
@@ -29,6 +35,8 @@ export function useBroker() {
       }),
     signup: (data: { username: string; email?: string; password: string; display_name: string }) =>
       brokerFetch("/auth/signup", { method: "POST", body: JSON.stringify(data) }),
+    googleAuth: (id_token: string) =>
+      brokerFetch("/auth/google", { method: "POST", body: JSON.stringify({ id_token }) }),
     me: () => brokerFetch("/auth/me"),
     getMyTeams: () => brokerFetch("/auth/teams"),
     selectTeam: (teamId: string) =>

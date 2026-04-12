@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 import { useAuthStore } from "../stores/authStore";
@@ -8,10 +8,7 @@ import { OrbitalBackground } from "../components/OrbitalBackground";
 
 export function LoginPage() {
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const navigate = useNavigate();
   const { login, selectTeam } = useAuthStore();
   const broker = useBroker();
@@ -19,55 +16,33 @@ export function LoginPage() {
   async function handlePostLogin(data: { token: string; user: any; teams: any[] }) {
     login(data.token, data.user, data.teams || []);
     if (data.teams?.length === 1) {
-      const selectData = await broker.selectTeam(data.teams[0].id);
-      selectTeam(selectData.token, { ...selectData.team });
-      navigate("/");
+      try {
+        const selectData = await broker.selectTeam(data.teams[0].id);
+        selectTeam(selectData.token, { ...selectData.team });
+        navigate("/");
+      } catch {
+        navigate("/teams");
+      }
     } else {
       navigate("/teams");
     }
   }
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!username || !password) return;
-    setError("");
-    setLoading(true);
-    try {
-      const data = await broker.login(username, password);
-      await handlePostLogin(data);
-    } catch (err: any) {
-      setError(err.message || "Failed to connect to server");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleGoogleLogin() {
     setError("");
-    setGoogleLoading(true);
+    setLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
 
-      const res = await fetch("/api/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_token: idToken }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Google sign-in failed");
-      }
-
-      const data = await res.json();
+      const data = await broker.googleAuth(idToken);
       await handlePostLogin(data);
     } catch (err: any) {
       if (err.code !== "auth/popup-closed-by-user") {
         setError(err.message || "Google sign-in failed");
       }
     } finally {
-      setGoogleLoading(false);
+      setLoading(false);
     }
   }
 
@@ -75,10 +50,11 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center relative" style={{ background: "var(--color-bg-base)" }}>
       <OrbitalBackground />
       <div className="w-full max-w-sm relative" style={{ zIndex: 1 }}>
-        <div className="rounded-xl p-8 shadow-2xl" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 mb-4">
-              <svg viewBox="0 0 200 200" className="w-20 h-20">
+        <div className="rounded-xl p-10 shadow-2xl" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+          {/* Logo */}
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center justify-center w-24 h-24 mb-5">
+              <svg viewBox="0 0 200 200" className="w-24 h-24">
                 <defs>
                   <radialGradient id="loginPlanet" cx="40%" cy="38%">
                     <stop offset="0%" stopColor="#fab283" />
@@ -91,26 +67,29 @@ export function LoginPage() {
                 <circle cx="52" cy="142" r="5" fill="#9d7cd8" opacity="0.7" />
               </svg>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight" style={{ color: "var(--color-primary)" }}>Orbit AI</h1>
-            <p className="mt-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>IT Team Coding Platform</p>
+            <h1 className="text-3xl font-semibold tracking-tight" style={{ color: "var(--color-primary)" }}>
+              Orbit AI
+            </h1>
+            <p className="mt-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+              AI-Powered Team Coding Platform
+            </p>
           </div>
 
           {/* Google Sign In */}
           <button
             onClick={handleGoogleLogin}
-            disabled={googleLoading}
-            className="w-full py-2.5 px-4 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-3 mb-4"
+            disabled={loading}
+            className="w-full py-3 px-4 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-3"
             style={{
-              background: "var(--color-bg-elevated)",
+              background: loading ? "var(--color-bg-hover)" : "var(--color-bg-elevated)",
               border: "1px solid var(--color-border)",
-              color: "var(--color-text-primary)",
-              cursor: googleLoading ? "wait" : "pointer",
-              opacity: googleLoading ? 0.7 : 1,
+              color: loading ? "var(--color-text-muted)" : "var(--color-text-primary)",
+              cursor: loading ? "wait" : "pointer",
             }}
-            onMouseEnter={(e) => { if (!googleLoading) e.currentTarget.style.borderColor = "var(--color-primary)"; }}
+            onMouseEnter={(e) => { if (!loading) e.currentTarget.style.borderColor = "var(--color-primary)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
           >
-            {googleLoading ? (
+            {loading ? (
               <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
             ) : (
               <svg width="18" height="18" viewBox="0 0 24 24">
@@ -120,49 +99,18 @@ export function LoginPage() {
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
             )}
-            {googleLoading ? "Connecting..." : "Continue with Google"}
+            {loading ? "Connecting..." : "Continue with Google"}
           </button>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>or</span>
-            <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
-          </div>
+          {error && (
+            <p className="mt-4 text-sm text-center" style={{ color: "var(--color-error)" }}>
+              {error}
+            </p>
+          )}
 
-          {/* Username/Password */}
-          <form onSubmit={handleLogin} className="space-y-3">
-            <div>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none transition-colors"
-                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")} onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                placeholder="Username" />
-            </div>
-            <div>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none transition-colors"
-                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")} onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                placeholder="Password" />
-            </div>
-
-            {error && <p className="text-sm" style={{ color: "var(--color-error)" }}>{error}</p>}
-
-            <button type="submit" disabled={loading || !username || !password}
-              className="w-full py-2.5 px-4 rounded-lg transition-all text-sm font-medium"
-              style={{
-                background: loading || !username || !password ? "var(--color-bg-hover)" : "var(--color-primary)",
-                color: loading || !username || !password ? "var(--color-text-muted)" : "var(--color-text-inverse)",
-                cursor: loading || !username || !password ? "not-allowed" : "pointer",
-              }}>
-              {loading ? "Signing in..." : "Sign In"}
-            </button>
-          </form>
-
-          <p className="mt-4 text-center text-xs" style={{ color: "var(--color-text-muted)" }}>
-            Don't have an account?{" "}
-            <Link to="/signup" className="transition-colors" style={{ color: "var(--color-primary)" }}>Sign up</Link>
+          <p className="mt-6 text-center text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
+            Sign in or create an account instantly with your Google account.
+            <br />No separate registration needed.
           </p>
         </div>
       </div>
