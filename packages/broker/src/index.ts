@@ -653,6 +653,35 @@ teamApi.get("/chat/:sessionId/messages", (c) => {
   return c.json(messages);
 });
 
+// Check OpenCode connection status for a project
+teamApi.get("/connections/claude/status", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  // Check if any project's OpenCode instance is reachable
+  const projects = db.query("SELECT opencode_port FROM projects WHERE team_id = ? LIMIT 1").all(user.team_id) as { opencode_port: number }[];
+  if (projects.length === 0) return c.json({ connected: false, reason: "No projects" });
+
+  const port = projects[0].opencode_port;
+  const password = process.env.OPENCODE_SERVER_PASSWORD || "testpass123";
+  try {
+    const res = await fetch(`http://localhost:${port}/session`, {
+      headers: { "Authorization": "Basic " + btoa(`opencode:${password}`) },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      return c.json({ connected: true, port });
+    }
+    return c.json({ connected: false, reason: `OpenCode responded with ${res.status}` });
+  } catch {
+    return c.json({ connected: false, reason: "OpenCode not running on port " + port });
+  }
+});
+
+// Check GitHub connection status
+teamApi.get("/connections/github/status", (c) => {
+  // TODO: Check if team has GitHub OAuth token stored
+  return c.json({ connected: false, reason: "GitHub OAuth not configured yet" });
+});
+
 teamApi.post("/chat/:sessionId", async (c) => {
   const user = c.get("user") as JWTPayload;
   const { sessionId } = c.req.param();
@@ -660,40 +689,89 @@ teamApi.post("/chat/:sessionId", async (c) => {
 
   if (!message) return c.json({ error: "message is required" }, 400);
 
-  // Get team's API key
-  const team = db.query("SELECT anthropic_api_key FROM teams WHERE id = ?").get(user.team_id) as { anthropic_api_key: string | null } | null;
+  // Find the session's project and its OpenCode port
+  const session = db.query(`
+    SELECT s.*, p.opencode_port, p.name as project_name
+    FROM sessions s JOIN projects p ON p.id = s.project_id
+    WHERE s.id = ?
+  `).get(sessionId) as any;
 
-  if (!team?.anthropic_api_key) {
-    return c.json({ error: "No Anthropic API key configured. Go to Team Settings to connect Claude." }, 400);
+  // If no session exists yet, try to find a project to use
+  let openCodePort: number;
+  if (session?.opencode_port) {
+    openCodePort = session.opencode_port;
+  } else {
+    // Use the first project's port as fallback
+    const proj = db.query("SELECT opencode_port FROM projects WHERE team_id = ? LIMIT 1").get(user.team_id) as any;
+    if (!proj) return c.json({ error: "No projects found" }, 400);
+    openCodePort = proj.opencode_port;
   }
 
   // Save user message
   db.run("INSERT INTO messages (session_id, role, content) VALUES (?, 'user', ?)", [sessionId, message]);
 
-  // Get conversation history
-  const history = db
-    .query("SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC")
-    .all(sessionId) as { role: string; content: string }[];
+  const password = process.env.OPENCODE_SERVER_PASSWORD || "testpass123";
+  const openCodeUrl = `http://localhost:${openCodePort}`;
 
-  const anthropic = new Anthropic({ apiKey: team.anthropic_api_key });
-
-  // Stream the response
+  // Stream the response via OpenCode
   return stream(c, async (s) => {
     try {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 8192,
-        messages: history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-        stream: true,
+      // First, ensure a session exists in OpenCode
+      let ocSessionId = sessionId;
+      try {
+        const listRes = await fetch(`${openCodeUrl}/session`, {
+          headers: { "Authorization": "Basic " + btoa(`opencode:${password}`) },
+        });
+        const sessions = await listRes.json() as any[];
+        if (!sessions.find((sess: any) => sess.id === sessionId)) {
+          // Create a new session in OpenCode
+          const createRes = await fetch(`${openCodeUrl}/session`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": "Basic " + btoa(`opencode:${password}`),
+            },
+            body: JSON.stringify({}),
+          });
+          const newSession = await createRes.json() as any;
+          ocSessionId = newSession.id;
+        }
+      } catch {}
+
+      // Send message to OpenCode
+      const res = await fetch(`${openCodeUrl}/session/${ocSessionId}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Basic " + btoa(`opencode:${password}`),
+        },
+        body: JSON.stringify({ parts: [{ type: "text", text: message }] }),
       });
 
-      let fullResponse = "";
+      if (!res.ok) {
+        const errText = await res.text();
+        await s.write(`data: ${JSON.stringify({ type: "error", error: `OpenCode error (${res.status}): ${errText}` })}\n\n`);
+        return;
+      }
 
-      for await (const event of response) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          fullResponse += event.delta.text;
-          await s.write(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`);
+      const data = await res.json() as any;
+
+      // Extract text from response
+      let fullResponse = "";
+      if (data.parts) {
+        for (const part of data.parts) {
+          if (part.type === "text" && part.text) {
+            fullResponse += part.text;
+            await s.write(`data: ${JSON.stringify({ type: "text", text: part.text })}\n\n`);
+          }
+          if (part.type === "tool-invocation" || part.type === "tool_use") {
+            const toolInfo = `[Tool: ${part.toolName || part.name} → ${part.result ? "done" : "running"}]`;
+            await s.write(`data: ${JSON.stringify({ type: "tool", tool: part.toolName || part.name, args: part.args || part.input, result: part.result })}\n\n`);
+          }
         }
+      } else if (typeof data.content === "string") {
+        fullResponse = data.content;
+        await s.write(`data: ${JSON.stringify({ type: "text", text: data.content })}\n\n`);
       }
 
       // Save assistant response
@@ -703,7 +781,7 @@ teamApi.post("/chat/:sessionId", async (c) => {
 
       await s.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
     } catch (err: any) {
-      await s.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Claude API error" })}\n\n`);
+      await s.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Failed to reach OpenCode" })}\n\n`);
     }
   });
 });
