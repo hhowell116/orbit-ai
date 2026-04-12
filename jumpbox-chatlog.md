@@ -265,6 +265,105 @@ gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
 - OpenCode integration (file editing, bash commands via Claude)
 - File lock enforcement (plugin not built)
 - OpenCode event subscriber
+
+---
+
+## Session 2 — April 10-12, 2026 (Local Machine + VM)
+
+Session with Claude Code on Hayden's local Windows machine, refining the dashboard and connecting to the VM.
+
+### What was done:
+
+**1. Deep dive & planning**
+- Read full project plan (projectplan.txt) — all 8 phases
+- Researched OpenCode auth: discovered `opencode-claude-auth` plugin that uses Claude Code's local OAuth credentials (no API key needed)
+- Researched competing platforms (Replit, Vercel, CodeSandbox, Linear) for dashboard feature ideas
+- Created detailed implementation plan merging architecture doc with OpenCode
+
+**2. OpenCode validation**
+- Installed OpenCode 1.4.3 on local machine
+- Tested `opencode serve` — API responds, sessions create/list/delete
+- Installed `@opencode-ai/sdk` 1.4.3 — mapped full API shape
+- Tested Claude responding through OpenCode with subscription auth (no API key)
+- Confirmed: Dashboard → Broker → OpenCode → Claude flow works
+
+**3. Dashboard UI overhaul**
+- Restyled entire dashboard to match OpenCode's design system:
+  - Colors: primary #fab283, secondary #5c9cf5, accent #9d7cd8, bg #0d1117
+  - Dark mode first, JetBrains Mono for code, clean borders
+- Added planetary/orbital SVG background theme (planets, rings, stars, moons)
+- Added stats bar (projects, active users, sessions, AI thinking)
+- Added activity feed sidebar with event icons
+- Added Command Palette (Ctrl+K) for instant navigation
+- Added active AI sessions section
+- Changed branding from "AI Dashboard" to "Orbit AI"
+- Planet favicon in browser tab
+
+**4. Firebase deployment**
+- Created Firebase project `orbitai-hub`
+- Deployed dashboard to `orbitai-hub.web.app`
+- Fixed: process/global polyfills for OpenCode SDK in browser
+- Fixed: React Router v7 API changes (createBrowserRouter)
+- Fixed: catch-all route for /login redirect
+
+**5. VM connection**
+- Confirmed broker running on VM at `spaces-run-viii-relying.trycloudflare.com`
+- Updated useBroker hook to route to tunnel URL in production
+- Login tested end-to-end through tunnel
+
+**6. Google-only login**
+- Simplified login page to single "Continue with Google" button
+- Removed username/password form from login (kept signup)
+- Firebase Auth handles Google OAuth popup
+
+**7. Connections page**
+- New `/connections` route with Claude AI and GitHub cards
+- Live status check — pings OpenCode on VM to show connected/disconnected
+- Feature lists for each integration
+- Claude info: "No API key needed — uses your Claude subscription"
+- Coming soon section: GitLab, Jira, Slack, Linear
+- Prominent "Connections" button in dashboard header
+
+**8. Chat endpoint rewrite — OpenCode proxy**
+- Replaced Anthropic SDK direct calls with OpenCode proxy
+- Chat flow: user message → broker saves to SQLite → forwards to OpenCode → OpenCode talks to Claude → response streamed back
+- OpenCode handles file editing, bash, permissions, sessions, tools
+- Tool call events (file edits, bash commands) included in response stream
+
+**9. Auto-deploy script**
+- `auto-deploy.sh` — checks GitHub every 60 seconds
+- If new commits: git pull → rebuild dashboard → restart broker
+- Logs to deploy.log
+
+**10. GitHub repo**
+- Made repo public: github.com/hhowell116/orbit-ai
+- Multiple commits pushed with all changes
+
+### Current architecture:
+```
+[Browser] → [Cloudflare Tunnel] → [Broker :5000 on VM]
+                                      ├── Serves dashboard (static files)
+                                      ├── API endpoints (auth, teams, projects, chat)
+                                      ├── SQLite database
+                                      └── Proxies chat to [OpenCode :4096+]
+                                              └── Claude (via subscription auth plugin)
+```
+
+### What works now:
+- Google sign-in via Firebase Auth
+- Team creation, invite codes, member management
+- Project creation (git clone or blank)
+- Connections page showing live Claude/GitHub status
+- Chat through OpenCode (when running on VM)
+- Planetary theme, command palette, activity feed
+- Auto-deploy from GitHub
+
+### Still needed:
+- OpenCode instances actually running per project on VM
+- File lock enforcement plugin
+- GitHub OAuth connection
+- Chat streaming improvements (token-by-token display)
+- Permission approval UI in browser
 - Permanent domain/URL (using free random tunnel)
 - Claude credential auth (blocked by Anthropic)
 - Nginx reverse proxy
