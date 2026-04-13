@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
@@ -41,6 +41,7 @@ export function ProjectsPage() {
   const [newProject, setNewProject] = useState({ name: "", git_url: "", description: "" });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { user, logout, activeTeam } = useAuthStore();
   const broker = useBroker();
@@ -227,12 +228,96 @@ export function ProjectsPage() {
         </div>
       )}
 
+      {/* Sidebar overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0" style={{ zIndex: 40, animation: "sidebarFadeIn 0.2s ease-out" }}
+          onClick={() => setSidebarOpen(false)}>
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} />
+          <aside className="absolute top-0 left-0 bottom-0 w-72 flex flex-col"
+            style={{ background: "var(--color-bg-surface)", borderRight: "1px solid var(--color-border)", animation: "sidebarSlideIn 0.2s ease-out" }}
+            onClick={(e) => e.stopPropagation()}>
+            {/* Sidebar header */}
+            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--color-border)" }}>
+              <div>
+                <h2 className="text-sm font-semibold" style={{ color: "var(--color-primary)" }}>Orbit AI</h2>
+                {activeTeam && <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{activeTeam.name}</p>}
+              </div>
+              <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg transition-colors"
+                style={{ color: "var(--color-text-muted)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-text-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+
+            {/* User info */}
+            <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--color-border)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium"
+                  style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>
+                  {user?.display_name?.charAt(0)?.toUpperCase() || "?"}
+                </div>
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{user?.display_name}</p>
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>@{user?.username}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Nav links */}
+            <nav className="flex-1 py-2 px-3">
+              {[
+                { label: "Manage Team", icon: "M15 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm-7.978-1A.261.261 0 017.002 13c.001-.246.154-.986.832-1.664C8.484 10.68 9.484 10 11 10c1.516 0 2.516.68 3.166 1.336.678.678.83 1.418.832 1.664a.261.261 0 01-.018.02H7.022zM11 7a2 2 0 100-4 2 2 0 000 4zm3-2a3 3 0 11-6 0 3 3 0 016 0zM6.936 9.28a5.88 5.88 0 00-1.23-.247A7.35 7.35 0 005 9c-4 0-5 3-5 4 0 .667.333 1 1 1h4.216A2.238 2.238 0 015 13c0-.779.357-1.85 1.084-2.828.243-.327.517-.634.852-.916zM4.92 10A5.493 5.493 0 004 13H1c0-.26.164-1.03.76-1.724.545-.636 1.492-1.256 3.16-1.275zM1.5 5.5a3 3 0 116 0 3 3 0 01-6 0zm3-2a2 2 0 100 4 2 2 0 000-4z", onClick: () => { setSidebarOpen(false); navigate(`/teams/${activeTeam?.id}/settings`); } },
+                { label: "Connections", icon: "M1.5 3A1.5 1.5 0 000 4.5v1A1.5 1.5 0 001.5 7h1A1.5 1.5 0 004 5.5v-1A1.5 1.5 0 002.5 3h-1zM5 4.5a.5.5 0 01.5-.5h9a.5.5 0 010 1h-9a.5.5 0 01-.5-.5zM5.5 10a.5.5 0 000 1h9a.5.5 0 000-1h-9zM12 4.5A1.5 1.5 0 0113.5 3h1A1.5 1.5 0 0116 4.5v1A1.5 1.5 0 0114.5 7h-1A1.5 1.5 0 0112 5.5v-1zM0 10.5A1.5 1.5 0 011.5 9h1A1.5 1.5 0 014 10.5v1A1.5 1.5 0 012.5 13h-1A1.5 1.5 0 010 11.5v-1z", onClick: () => { setSidebarOpen(false); navigate("/connections"); } },
+                { label: "Switch Team", icon: "M8 8a3 3 0 100-6 3 3 0 000 6zM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 00-11.215 0c-.22.578.254 1.139.872 1.139h9.47z", onClick: () => { setSidebarOpen(false); navigate("/teams"); } },
+              ].map((item) => (
+                <button key={item.label} onClick={item.onClick}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                  style={{ color: "var(--color-text-secondary)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-hover)"; e.currentTarget.style.color = "var(--color-text-primary)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                  <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0" fill="currentColor"><path d={item.icon} /></svg>
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* Sign out at bottom */}
+            <div className="px-3 py-3" style={{ borderTop: "1px solid var(--color-border)" }}>
+              <button onClick={() => { setSidebarOpen(false); logout(); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                style={{ color: "var(--color-text-muted)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-error-muted)"; e.currentTarget.style.color = "var(--color-error)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-muted)"; }}>
+                <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0" fill="currentColor">
+                  <path d="M6 1a1 1 0 00-1 1v1.5a.5.5 0 01-1 0V2a2 2 0 012-2h7a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2v-1.5a.5.5 0 011 0V14a1 1 0 001 1h7a1 1 0 001-1V2a1 1 0 00-1-1H6z"/>
+                  <path d="M1.5 8a.5.5 0 01.5-.5h8.793L8.646 5.354a.5.5 0 01.708-.708l3 3a.5.5 0 010 .708l-3 3a.5.5 0 01-.708-.708L10.793 8.5H2a.5.5 0 01-.5-.5z"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* Header */}
       <header
         className="px-6 py-4 flex items-center justify-between relative"
         style={{ zIndex: 1, borderBottom: "1px solid var(--color-border)" }}
       >
         <div className="flex items-center gap-3">
+          {/* Hamburger */}
+          <button onClick={() => setSidebarOpen(true)}
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: "var(--color-text-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "transparent"; }}>
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+              <path fillRule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" clipRule="evenodd" />
+            </svg>
+          </button>
           <h1 className="text-lg font-semibold" style={{ color: "var(--color-primary)" }}>
             Orbit AI
           </h1>
@@ -240,21 +325,12 @@ export function ProjectsPage() {
             <>
               <span style={{ color: "var(--color-text-muted)" }}>/</span>
               <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam.name}</span>
-              <Link
-                to={`/teams/${activeTeam.id}/settings`}
-                className="text-xs px-1.5 py-0.5 rounded transition-colors"
-                style={{ color: "var(--color-text-muted)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
-                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
-              >
-                settings
-              </Link>
             </>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <kbd
-            className="text-xs px-2 py-0.5 rounded font-mono cursor-pointer"
+            className="text-xs px-2 py-0.5 rounded font-mono"
             style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
             onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
           >
@@ -264,48 +340,6 @@ export function ProjectsPage() {
             <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
             <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>{user?.display_name}</span>
           </div>
-          <button
-            onClick={() => navigate(`/teams/${activeTeam?.id}/settings`)}
-            className="text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
-            style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}
-          >
-            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
-              <path d="M15 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm-7.978-1A.261.261 0 017.002 13c.001-.246.154-.986.832-1.664C8.484 10.68 9.484 10 11 10c1.516 0 2.516.68 3.166 1.336.678.678.83 1.418.832 1.664a.261.261 0 01-.018.02H7.022zM11 7a2 2 0 100-4 2 2 0 000 4zm3-2a3 3 0 11-6 0 3 3 0 016 0zM6.936 9.28a5.88 5.88 0 00-1.23-.247A7.35 7.35 0 005 9c-4 0-5 3-5 4 0 .667.333 1 1 1h4.216A2.238 2.238 0 015 13c0-.779.357-1.85 1.084-2.828.243-.327.517-.634.852-.916zM4.92 10A5.493 5.493 0 004 13H1c0-.26.164-1.03.76-1.724.545-.636 1.492-1.256 3.16-1.275zM1.5 5.5a3 3 0 116 0 3 3 0 01-6 0zm3-2a2 2 0 100 4 2 2 0 000-4z"/>
-            </svg>
-            Manage Team
-          </button>
-          <button
-            onClick={() => navigate("/connections")}
-            className="text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
-            style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}
-          >
-            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
-              <path d="M1.5 3A1.5 1.5 0 0 0 0 4.5v1A1.5 1.5 0 0 0 1.5 7h1A1.5 1.5 0 0 0 4 5.5v-1A1.5 1.5 0 0 0 2.5 3h-1ZM5 4.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5ZM5.5 10a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9ZM12 4.5A1.5 1.5 0 0 1 13.5 3h1A1.5 1.5 0 0 1 16 4.5v1A1.5 1.5 0 0 1 14.5 7h-1A1.5 1.5 0 0 1 12 5.5v-1ZM0 10.5A1.5 1.5 0 0 1 1.5 9h1A1.5 1.5 0 0 1 4 10.5v1A1.5 1.5 0 0 1 2.5 13h-1A1.5 1.5 0 0 1 0 11.5v-1Z"/>
-            </svg>
-            Connections
-          </button>
-          <button
-            onClick={() => navigate("/teams")}
-            className="text-xs transition-colors"
-            style={{ color: "var(--color-text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-text-primary)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
-          >
-            Switch team
-          </button>
-          <button
-            onClick={logout}
-            className="text-xs transition-colors"
-            style={{ color: "var(--color-text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-text-primary)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
-          >
-            Sign out
-          </button>
         </div>
       </header>
 

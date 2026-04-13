@@ -70,3 +70,29 @@ body {
   background: var(--color-primary-muted);
   color: var(--color-primary);
 }
+
+@keyframes twinkle {
+  0%, 100% { opacity: var(--tw-opacity, 0.3); }
+  50% { opacity: 0.05; }
+}
+
+@keyframes nebulaDrift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(30px, -20px) scale(1.05); }
+}
+
+@keyframes shootingStar {
+  0%, 90%, 100% { opacity: 0; transform: rotate(-35deg) translateX(0); }
+  93% { opacity: 0.8; }
+  96% { opacity: 0; transform: rotate(-35deg) translateX(200px); }
+}
+
+@keyframes sidebarSlideIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes sidebarFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
