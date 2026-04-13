@@ -136,6 +136,14 @@ function runMigrations() {
     db.exec("ALTER TABLE users ADD COLUMN email TEXT");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL");
   }
+
+  const teamCols = db.prepare("PRAGMA table_info(teams)").all() as { name: string }[];
+  if (!teamCols.find((c) => c.name === "claude_auth_method")) {
+    db.exec("ALTER TABLE teams ADD COLUMN claude_auth_method TEXT DEFAULT 'api_key'");
+  }
+  if (!teamCols.find((c) => c.name === "github_token")) {
+    db.exec("ALTER TABLE teams ADD COLUMN github_token TEXT");
+  }
 }
 
 runMigrations();

@@ -47,7 +47,7 @@ export function useBroker() {
       brokerFetch("/teams/join", { method: "POST", body: JSON.stringify({ code }) }),
     getTeam: (id: string) => brokerFetch(`/teams/${id}`),
     getTeamMembers: (id: string) => brokerFetch(`/teams/${id}/members`),
-    updateTeam: (id: string, data: { name?: string; anthropic_api_key?: string }) =>
+    updateTeam: (id: string, data: { name?: string; anthropic_api_key?: string; claude_auth_method?: string; github_token?: string }) =>
       brokerFetch(`/teams/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     removeTeamMember: (teamId: string, userId: string) =>
       brokerFetch(`/teams/${teamId}/members/${userId}`, { method: "DELETE" }),

@@ -7,9 +7,10 @@ interface ChatWindowProps {
   sessionStatus: "idle" | "thinking" | "error";
   onSendMessage: (text: string) => void;
   onAbort: () => void;
+  claudeConnected?: boolean | null;
 }
 
-export function ChatWindow({ messages, sessionStatus, onSendMessage, onAbort }: ChatWindowProps) {
+export function ChatWindow({ messages, sessionStatus, onSendMessage, onAbort, claudeConnected }: ChatWindowProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -34,9 +35,25 @@ export function ChatWindow({ messages, sessionStatus, onSendMessage, onAbort }: 
 
   return (
     <div className="flex flex-col h-full">
+      {/* Connection warning */}
+      {claudeConnected === false && (
+        <div className="mx-4 mt-4 rounded-lg px-4 py-3 flex items-center gap-3"
+          style={{ background: "var(--color-warning-muted)", border: "1px solid rgba(245, 167, 66, 0.3)" }}>
+          <svg viewBox="0 0 20 20" fill="var(--color-warning)" className="w-5 h-5 shrink-0">
+            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+          </svg>
+          <div>
+            <p className="text-sm font-medium" style={{ color: "var(--color-warning)" }}>Enable your Claude connection to start working!</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+              Go to Connections to set up your API key or Claude credentials.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && claudeConnected !== false && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <span className="text-2xl" style={{ color: "var(--color-primary)", opacity: 0.3 }}>
               &gt;_
