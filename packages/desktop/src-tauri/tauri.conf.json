@@ -8,7 +8,6 @@
     "devUrl": "https://orbitai.work"
   },
   "app": {
-    "title": "Orbit AI",
     "windows": [
       {
         "title": "Orbit AI",
