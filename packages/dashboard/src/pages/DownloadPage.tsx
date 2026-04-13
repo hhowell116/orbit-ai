@@ -84,7 +84,7 @@ export function DownloadPage() {
 
       <div className="w-full max-w-lg relative" style={{ zIndex: 1 }}>
         {/* Back link */}
-        <button onClick={() => navigate(-1 as any)} className="mb-4 text-sm transition-colors flex items-center gap-1"
+        <button onClick={() => window.history.length > 1 ? window.history.back() : navigate('/login')} className="mb-4 text-sm transition-colors flex items-center gap-1"
           style={{ color: "var(--color-text-muted)" }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
