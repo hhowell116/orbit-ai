@@ -32,7 +32,8 @@
       "endpoints": [
         "https://github.com/hhowell116/orbit-ai/releases/latest/download/latest.json"
       ],
-      "dialog": true
+      "dialog": true,
+      "pubkey": "MCowBQYDK2VwAyEAgThZLLrIeGfj8yHy08rJdgC3GINwWT59gspRmVnvLv0="
     }
   },
   "bundle": {
