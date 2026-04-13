@@ -392,6 +392,40 @@ api.patch("/teams/:id/members/:userId", authMiddleware, async (c) => {
   return c.json({ ok: true });
 });
 
+// Transfer team ownership
+api.post("/teams/:id/transfer", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const { new_owner_id } = await c.req.json<{ new_owner_id: string }>();
+
+  if (!new_owner_id) return c.json({ error: "new_owner_id is required" }, 400);
+
+  // Verify requester is the current owner
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || membership.role !== "owner") {
+    return c.json({ error: "Only the team owner can transfer ownership" }, 403);
+  }
+
+  // Verify target is a member of the team
+  const target = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, new_owner_id) as { role: string } | null;
+
+  if (!target) {
+    return c.json({ error: "Target user is not a member of this team" }, 400);
+  }
+
+  // Transfer: new owner becomes owner, old owner becomes admin
+  db.run("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND user_id = ?", [id, new_owner_id]);
+  db.run("UPDATE team_members SET role = 'admin' WHERE team_id = ? AND user_id = ?", [id, user.sub]);
+  db.run("UPDATE teams SET owner_id = ? WHERE id = ?", [new_owner_id, id]);
+
+  return c.json({ ok: true });
+});
+
 // --- Invite routes ---
 
 api.post("/teams/:id/invites", authMiddleware, async (c) => {
