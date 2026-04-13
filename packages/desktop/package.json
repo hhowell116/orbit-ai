@@ -1,0 +1,14 @@
+{
+  "name": "@orbit-ai/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Orbit AI desktop app — native wrapper via Tauri",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -386,6 +386,13 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 | GET | /api/connections/github/status | Check if user has GitHub connected |
 | PUT | /api/connections/:provider | Save encrypted token for provider |
 | DELETE | /api/connections/:provider | Remove connection |
+| GET | /api/projects/:id/git/status | Git status, branch, changed files, recent commits |
+| POST | /api/projects/:id/git/init | Initialize git repo, optionally set remote |
+| POST | /api/projects/:id/git/commit | Stage all + commit with user's name |
+| POST | /api/projects/:id/git/push | Push using user's encrypted GitHub token |
+| POST | /api/projects/:id/git/pull | Pull with rebase using user's token |
+| POST | /api/projects/:id/upload | Upload zip file to project directory |
+| POST | /api/teams/:id/transfer | Transfer team ownership to another member |
 | GET | /api/activity/recent | Activity feed |
 | GET | /api/activity/stream | SSE real-time stream |
 | GET | /api/usage | Token usage stats |
@@ -465,7 +472,17 @@ orbit-ai/
 │   │   │   └── index.css       ← Tailwind + theme variables
 │   │   ├── dist/               ← Built static files (served by broker)
 │   │   └── package.json
-│   └── opencode-plugin/        ← Stub for file lock enforcement
+│   ├── opencode-plugin/        ← Stub for file lock enforcement
+│   └── desktop/
+│       ├── package.json        ← Tauri CLI dependency
+│       ├── BUILD.md            ← Build instructions
+│       ├── dist/               ← Minimal HTML redirect to orbitai.work
+│       └── src-tauri/
+│           ├── Cargo.toml      ← Rust dependencies (tauri v2)
+│           ├── tauri.conf.json ← App config (window size, URL, bundle settings)
+│           ├── build.rs        ← Tauri build script
+│           ├── src/main.rs     ← Minimal Rust entry point
+│           └── icons/          ← App icons (ico, icns, png)
 ├── projects/                   ← Cloned project repos stored here
 ├── setup-tunnel.sh             ← One-time: create named Cloudflare tunnel
 ├── start.sh                    ← Start broker + tunnel (if not running)
@@ -487,6 +504,81 @@ orbit-ai/
 | bob | admin123 | bob@orbitai.dev | IT Department | member |
 
 Seeded projects: CRM (:4096), Helpdesk (:4097), Infrastructure (:4098)
+
+---
+
+## Project Deployment Workflow (How Users Ship Code)
+
+Orbit AI is a development environment, not a hosting platform. Users write code with Claude's help, then deploy through their own pipelines. Each user brings their own GitHub token.
+
+### The Flow
+
+```
+1. User creates project in Orbit AI (clone repo, upload zip, or blank)
+2. User works with Claude — Claude edits files on the VM
+3. User sees changes in the Git panel (sidebar)
+4. User writes a commit message → clicks Commit
+5. User clicks Push → broker uses THEIR GitHub token to push
+6. Their repo's CI/CD (GitHub Actions, Vercel, Firebase, Netlify) deploys automatically
+```
+
+### Per-User Git Authentication
+
+Each user stores their own GitHub Personal Access Token in Connections. When pushing:
+- Token is decrypted from `user_connections` table
+- Injected as `https://x-access-token:{token}@github.com/...`
+- Push happens under that user's GitHub identity
+- Token is never leaked in error messages (scrubbed from stderr)
+
+### Project Storage
+
+All project files live on the VM at `orbit-ai/projects/<project-slug>/`. This is a shared working directory — multiple users can work on the same project, but file locks prevent conflicting edits.
+
+### Supported Project Sources
+
+| Method | Description |
+|--------|-------------|
+| Git clone | Paste a GitHub/GitLab URL, cloned to VM |
+| Zip upload | Upload a .zip, extracted to project directory |
+| Blank | Empty directory, initialize git manually |
+
+---
+
+## Desktop App (Tauri)
+
+Orbit AI has an optional native desktop app built with **Tauri v2**. It wraps the web app in a lightweight native window using the system's WebView (WebView2 on Windows, WKWebView on macOS).
+
+### Why Tauri (not Electron)
+
+| | Tauri | Electron |
+|--|-------|----------|
+| Bundle size | ~5-10 MB | ~150 MB |
+| Runtime | System WebView | Bundled Chromium |
+| Memory | ~30 MB | ~150 MB |
+| Language | Rust | Node.js |
+
+### How It Works
+
+The desktop app is just a native window that loads `https://orbitai.work`. All features work identically to the browser — auth, chat, git, connections. The app doesn't contain any business logic; it's purely a UI shell.
+
+### Building
+
+```bash
+cd packages/desktop
+npm install        # Install Tauri CLI
+npm run build      # Build release binary
+```
+
+**Prerequisites:** Rust toolchain (rustup.rs), Node.js 18+
+
+**Output:**
+- **Windows**: `src-tauri/target/release/bundle/nsis/Orbit AI_0.1.0_x64-setup.exe`
+- **macOS**: `src-tauri/target/release/bundle/dmg/Orbit AI_0.1.0_aarch64.dmg`
+- **Linux**: `src-tauri/target/release/bundle/appimage/orbit-ai_0.1.0_amd64.AppImage`
+
+### Distribution
+
+Build the `.exe` once, host it anywhere (GitHub Releases, a shared drive, the Orbit AI site itself). Users download and install — no admin rights needed (NSIS `currentUser` install mode).
 
 ---
 
