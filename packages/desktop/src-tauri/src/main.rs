@@ -12,32 +12,98 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 struct PtyState {
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    ws_sender: broadcast::Sender<String>,
+    writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
 }
 
 #[tauri::command]
 fn pty_write(state: tauri::State<PtyState>, data: String) {
-    if let Ok(mut writer) = state.writer.lock() {
-        let _ = writer.write_all(data.as_bytes());
-        let _ = writer.flush();
+    if let Some(ref writer) = state.writer {
+        if let Ok(mut w) = writer.lock() {
+            let _ = w.write_all(data.as_bytes());
+            let _ = w.flush();
+        }
     }
 }
 
 #[tauri::command]
-fn pty_resize(_width: u16, _height: u16) {
-    // PTY resize placeholder
+fn pty_resize(_width: u16, _height: u16) {}
+
+fn try_spawn_pty(
+    handle: tauri::AppHandle,
+    ws_tx: broadcast::Sender<String>,
+) -> Option<Arc<Mutex<Box<dyn Write + Send>>>> {
+    let pty_system = native_pty_system();
+    let pair = match pty_system.openpty(PtySize {
+        rows: 24, cols: 80, pixel_width: 0, pixel_height: 0,
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[pty] Failed to open PTY: {}", e);
+            return None;
+        }
+    };
+
+    // Try powershell first, fall back to cmd
+    let shells: Vec<String> = if cfg!(target_os = "windows") {
+        vec!["powershell.exe".into(), "cmd.exe".into()]
+    } else {
+        vec![
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()),
+            "/bin/sh".into(),
+        ]
+    };
+
+    let mut child = None;
+    for shell in &shells {
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.cwd(dirs_next::home_dir().unwrap_or_else(|| ".".into()));
+        match pair.slave.spawn_command(cmd) {
+            Ok(c) => {
+                println!("[pty] Spawned shell: {}", shell);
+                child = Some(c);
+                break;
+            }
+            Err(e) => {
+                eprintln!("[pty] Failed to spawn {}: {}", shell, e);
+            }
+        }
+    }
+
+    if child.is_none() {
+        eprintln!("[pty] Could not spawn any shell — terminal disabled");
+        return None;
+    }
+
+    drop(pair.slave);
+
+    let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+    let mut reader = pair.master.try_clone_reader().unwrap();
+
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = handle.emit("pty-output", &data);
+                    let _ = ws_tx.send(data);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Some(writer)
 }
 
 fn main() {
-    // Create a broadcast channel for PTY output → WebSocket clients
     let (ws_tx, _) = broadcast::channel::<String>(256);
     let ws_tx_clone = ws_tx.clone();
 
-    // Start the tokio runtime for WebSocket server
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-    // Spawn WebSocket bridge server on localhost:9876
+    // WebSocket bridge server
     let ws_tx_for_server = ws_tx.clone();
     rt.spawn(async move {
         let listener = match TcpListener::bind("127.0.0.1:9876").await {
@@ -65,7 +131,6 @@ fn main() {
 
                     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-                    // Send PTY output to WebSocket client
                     let write_task = tokio::spawn(async move {
                         while let Ok(data) = rx.recv().await {
                             let msg = serde_json::json!({
@@ -78,15 +143,8 @@ fn main() {
                         }
                     });
 
-                    // Read messages from WebSocket client (input to PTY)
-                    // Note: WebSocket input goes through Tauri IPC, not directly here
-                    // This just keeps the connection alive and handles pings
                     while let Some(Ok(msg)) = ws_read.next().await {
                         match msg {
-                            Message::Ping(data) => {
-                                // Pong is handled automatically by tungstenite
-                                let _ = data;
-                            }
                             Message::Close(_) => break,
                             _ => {}
                         }
@@ -104,57 +162,20 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let handle = app.handle().clone();
-            let ws_tx = ws_tx_clone.clone();
 
-            // Spawn PTY with default shell
-            let pty_system = native_pty_system();
-            let pair = pty_system
-                .openpty(PtySize {
-                    rows: 24,
-                    cols: 80,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .expect("Failed to open PTY");
+            // Try to spawn terminal — app works without it
+            let writer = try_spawn_pty(handle, ws_tx_clone.clone());
 
-            let shell = if cfg!(target_os = "windows") {
-                "powershell.exe".to_string()
-            } else {
-                std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-            };
+            if writer.is_none() {
+                // Notify frontend that terminal is unavailable
+                let h = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let _ = h.emit("pty-output", "\x1b[33mTerminal unavailable — shell could not be started.\x1b[0m\r\n\x1b[33mThe dashboard still works normally above.\x1b[0m\r\n");
+                });
+            }
 
-            let mut cmd = CommandBuilder::new(&shell);
-            cmd.cwd(dirs_next::home_dir().unwrap_or_else(|| ".".into()));
-
-            let _child = pair.slave.spawn_command(cmd).expect("Failed to spawn shell");
-            drop(pair.slave);
-
-            let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
-
-            // Read PTY output → emit to frontend + broadcast to WebSocket clients
-            let mut reader = pair.master.try_clone_reader().unwrap();
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 4096];
-                loop {
-                    match reader.read(&mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                            // Send to Tauri frontend (embedded terminal)
-                            let _ = handle.emit("pty-output", &data);
-                            // Broadcast to WebSocket clients (browser bridge)
-                            let _ = ws_tx.send(data);
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-
-            app.manage(PtyState {
-                writer,
-                ws_sender: ws_tx_clone,
-            });
-
+            app.manage(PtyState { writer });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![pty_write, pty_resize])
