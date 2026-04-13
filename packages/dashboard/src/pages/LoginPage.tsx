@@ -144,9 +144,7 @@ export function LoginPage() {
         {/* Download desktop app */}
         <div className="mt-4 text-center">
           <a
-            href="https://github.com/hhowell116/orbit-ai/releases/latest"
-            target="_blank"
-            rel="noopener"
+            href="/download"
             className="inline-flex items-center gap-2 text-xs px-4 py-2 rounded-lg transition-all"
             style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)", background: "rgba(21, 27, 35, 0.6)", backdropFilter: "blur(10px)" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(167, 139, 250, 0.3)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}

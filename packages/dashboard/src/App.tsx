@@ -12,6 +12,7 @@ import { TeamSettingsPage } from "./pages/TeamSettingsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
+import { DownloadPage } from "./pages/DownloadPage";
 
 // Requires auth token but no team
 function AuthOnlyLayout() {
@@ -37,6 +38,10 @@ const router = createBrowserRouter([
   {
     path: "/signup",
     element: <SignupPage />,
+  },
+  {
+    path: "/download",
+    element: <DownloadPage />,
   },
   {
     element: <AuthOnlyLayout />,
