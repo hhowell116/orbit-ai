@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useBroker } from "../hooks/useBroker";
+import { useBridge } from "../hooks/useBridge";
 import { ChatWindow } from "../components/ChatWindow";
 import { FileLockIndicator } from "../components/FileLockIndicator";
 import type { Message } from "../components/MessageBubble";
@@ -39,6 +40,7 @@ export function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const broker = useBroker();
+  const { bridgeConnected } = useBridge();
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
@@ -257,6 +259,13 @@ export function ProjectPage() {
           <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{project.description}</p>
         </div>
         <div className="ml-auto flex items-center gap-3">
+          {bridgeConnected && (
+            <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
+              style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--color-success)" }} />
+              Claude Code
+            </span>
+          )}
           {sessionStatus === "thinking" && (
             <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-secondary)" }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--color-secondary)" }} />
@@ -270,7 +279,7 @@ export function ProjectPage() {
       <div className="flex-1 flex min-h-0">
         {/* Chat */}
         <div className="flex-[7] flex flex-col min-h-0" style={{ borderRight: "1px solid var(--color-border)" }}>
-          <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} claudeConnected={claudeConnected} />
+          <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} claudeConnected={claudeConnected || bridgeConnected} />
         </div>
 
         {/* Sidebar */}
