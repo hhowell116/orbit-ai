@@ -323,9 +323,9 @@ export function ProjectsPage() {
 
             {/* Bottom actions */}
             <div className="px-3 py-3 space-y-1" style={{ borderTop: "1px solid var(--color-border)" }}>
-              <a href="https://github.com/hhowell116/orbit-ai/releases/latest" target="_blank" rel="noopener"
+              <button onClick={() => { setSidebarOpen(false); navigate("/download"); }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
-                style={{ color: "var(--color-text-secondary)", textDecoration: "none" }}
+                style={{ color: "var(--color-text-secondary)" }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-hover)"; e.currentTarget.style.color = "var(--color-text-primary)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
                 <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0" fill="currentColor">
@@ -333,7 +333,7 @@ export function ProjectsPage() {
                   <path d="M7.25 7.689V2a.75.75 0 011.5 0v5.689l1.97-1.969a.749.749 0 111.06 1.06l-3.25 3.25a.749.749 0 01-1.06 0L4.22 6.78a.749.749 0 111.06-1.06l1.97 1.969z"/>
                 </svg>
                 Download Desktop App
-              </a>
+              </button>
               <button onClick={() => { setSidebarOpen(false); logout(); }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
                 style={{ color: "var(--color-text-muted)" }}
