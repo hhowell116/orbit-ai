@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
+import { encrypt, isEncrypted } from "./crypto";
 
 const DB_PATH = process.env.DB_PATH || join(import.meta.dir, "..", "team.db");
 
@@ -160,6 +161,36 @@ function runMigrations() {
 }
 
 runMigrations();
+
+// Encrypt any existing plaintext keys in the database
+function encryptExistingKeys() {
+  // Encrypt legacy team-level keys
+  const teams = db.prepare("SELECT id, anthropic_api_key, github_token FROM teams").all() as {
+    id: string; anthropic_api_key: string | null; github_token: string | null;
+  }[];
+  for (const team of teams) {
+    if (team.anthropic_api_key && !isEncrypted(team.anthropic_api_key)) {
+      db.run("UPDATE teams SET anthropic_api_key = ? WHERE id = ?", [encrypt(team.anthropic_api_key), team.id]);
+      console.log(`[crypto] Encrypted existing API key for team ${team.id}`);
+    }
+    if (team.github_token && !isEncrypted(team.github_token)) {
+      db.run("UPDATE teams SET github_token = ? WHERE id = ?", [encrypt(team.github_token), team.id]);
+      console.log(`[crypto] Encrypted existing GitHub token for team ${team.id}`);
+    }
+  }
+
+  // Encrypt user_connections tokens
+  const conns = db.prepare("SELECT rowid, token FROM user_connections").all() as {
+    rowid: number; token: string;
+  }[];
+  for (const conn of conns) {
+    if (conn.token && !isEncrypted(conn.token)) {
+      db.run("UPDATE user_connections SET token = ? WHERE rowid = ?", [encrypt(conn.token), conn.rowid]);
+      console.log(`[crypto] Encrypted existing user connection token (rowid ${conn.rowid})`);
+    }
+  }
+}
+encryptExistingKeys();
 
 export { db };
 export type { Database };

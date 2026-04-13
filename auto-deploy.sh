@@ -20,15 +20,16 @@ while true; do
   # Fetch latest from GitHub
   git fetch origin main --quiet 2>/dev/null
 
-  # Check if there are new commits
-  LOCAL=$(git rev-parse HEAD)
-  REMOTE=$(git rev-parse origin/main)
+  # Only deploy when remote has commits we don't have
+  BEHIND=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo 0)
 
-  if [ "$LOCAL" != "$REMOTE" ]; then
-    echo "$(date) - New commits detected. Deploying..." | tee -a "$LOG_FILE"
+  if [ "$BEHIND" -gt 0 ]; then
+    LOCAL=$(git rev-parse HEAD)
+    REMOTE=$(git rev-parse origin/main)
+    echo "$(date) - $BEHIND new commit(s) detected. Deploying..." | tee -a "$LOG_FILE"
 
-    # Pull changes
-    git pull origin main --quiet 2>&1 | tee -a "$LOG_FILE"
+    # Hard-reset to match GitHub exactly (this VM is a deploy target)
+    git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
 
     # Install dependencies if package.json changed
     if git diff "$LOCAL" "$REMOTE" --name-only | grep -q "package.json"; then
@@ -55,6 +56,22 @@ while true; do
     else
       echo "$(date) - WARNING: Broker may have failed to start. Check /tmp/orbit-broker.log" | tee -a "$LOG_FILE"
     fi
+
+    # Ensure tunnel is still alive after broker restart
+    if ! pgrep -f "cloudflared tunnel run" > /dev/null 2>&1; then
+      echo "$(date) - Tunnel died during deploy, restarting..." | tee -a "$LOG_FILE"
+      nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
+      sleep 2
+      echo "$(date) - Tunnel restarted (PID $!)" | tee -a "$LOG_FILE"
+    fi
+  fi
+
+  # Periodic tunnel health check (every poll cycle, not just on deploy)
+  if ! pgrep -f "cloudflared tunnel run" > /dev/null 2>&1; then
+    echo "$(date) - Tunnel not running, starting..." | tee -a "$LOG_FILE"
+    nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
+    sleep 2
+    echo "$(date) - Tunnel started (PID $!)" | tee -a "$LOG_FILE"
   fi
 
   sleep "$CHECK_INTERVAL"
