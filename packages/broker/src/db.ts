@@ -124,6 +124,19 @@ db.exec(`
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_connections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      token TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, provider),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
 // Run migrations for columns added after initial schema
 function runMigrations() {
   const projectCols = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
