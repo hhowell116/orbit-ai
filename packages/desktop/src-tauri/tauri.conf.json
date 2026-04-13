@@ -5,14 +5,14 @@
   "identifier": "com.orbitai.app",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "https://orbitai.work"
+    "devUrl": "http://localhost:5173"
   },
   "app": {
     "windows": [
       {
         "title": "Orbit AI",
-        "width": 1280,
-        "height": 860,
+        "width": 1400,
+        "height": 900,
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
@@ -21,7 +21,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' https://orbitai.work https://*.firebaseapp.com https://*.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://orbitai.work https://*.googleapis.com wss: ws:; frame-src https://orbitai.work https://*.firebaseapp.com"
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
     }
   },
   "bundle": {
