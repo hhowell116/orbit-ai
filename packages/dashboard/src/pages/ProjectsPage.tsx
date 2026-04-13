@@ -39,6 +39,7 @@ export function ProjectsPage() {
   const [error, setError] = useState("");
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProject, setNewProject] = useState({ name: "", git_url: "", description: "" });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -102,13 +103,18 @@ export function ProjectsPage() {
     setCreating(true);
     setCreateError("");
     try {
-      await broker.createProject({
+      const project = await broker.createProject({
         name: newProject.name,
         git_url: newProject.git_url || undefined,
         description: newProject.description || undefined,
       });
+      // If a file was selected, upload it to the new project
+      if (uploadFile && project?.id) {
+        await broker.uploadToProject(project.id, uploadFile);
+      }
       setShowNewProject(false);
       setNewProject({ name: "", git_url: "", description: "" });
+      setUploadFile(null);
       broker.getProjects().then(setProjects).catch(() => {});
     } catch (err: any) {
       setCreateError(err.message || "Failed to create project");
@@ -165,20 +171,51 @@ export function ProjectsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
-                  Git Repository URL
+                  Source (optional)
                 </label>
                 <input
                   type="text"
                   value={newProject.git_url}
-                  onChange={(e) => setNewProject((p) => ({ ...p, git_url: e.target.value }))}
+                  onChange={(e) => { setNewProject((p) => ({ ...p, git_url: e.target.value })); if (e.target.value) setUploadFile(null); }}
                   className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
                   style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
                   onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
                   onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                  placeholder="https://github.com/user/repo.git (optional)"
+                  placeholder="https://github.com/user/repo.git"
+                  disabled={!!uploadFile}
                 />
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>or</span>
+                  <label
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                    style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                    Upload .zip
+                    <input
+                      type="file"
+                      accept=".zip"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setUploadFile(file);
+                        if (file) setNewProject((p) => ({ ...p, git_url: "" }));
+                      }}
+                    />
+                  </label>
+                  {uploadFile && (
+                    <div className="flex items-center gap-1.5 flex-1">
+                      <span className="text-xs font-mono truncate" style={{ color: "var(--color-primary)" }}>{uploadFile.name}</span>
+                      <button type="button" onClick={() => setUploadFile(null)} className="text-xs" style={{ color: "var(--color-text-muted)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                        x
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
-                  Leave empty to create a blank project
+                  Clone a repo, upload a zip, or leave empty for a blank project
                 </p>
               </div>
               <div>

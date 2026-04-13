@@ -73,6 +73,21 @@ export function useBroker() {
       brokerFetch("/projects", { method: "POST", body: JSON.stringify(data) }),
     deleteProject: (id: string) =>
       brokerFetch(`/projects/${id}`, { method: "DELETE" }),
+    uploadToProject: async (projectId: string, file: File) => {
+      const token = useAuthStore.getState().token;
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${BROKER_URL}/projects/${projectId}/upload`, {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || res.statusText);
+      }
+      return res.json();
+    },
     getProjectLocks: (projectId: string) => brokerFetch(`/locks/${projectId}`),
 
     // Sessions
