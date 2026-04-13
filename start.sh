@@ -10,10 +10,10 @@ export NVM_DIR="$HOME/.nvm"
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BROKER_DIR="$PROJECT_DIR/packages/broker"
+DOMAIN="orbitai.work"
 
-# Kill any existing processes
+# Kill any existing broker
 kill $(lsof -ti:5000) 2>/dev/null || true
-pkill -f cloudflared 2>/dev/null || true
 sleep 1
 
 echo "=== Orbit AI ==="
@@ -34,33 +34,24 @@ else
   exit 1
 fi
 
-# Start tunnel
-echo "[2/2] Starting Cloudflare tunnel..."
-nohup cloudflared tunnel --url http://localhost:5000 > /tmp/orbit-tunnel.log 2>&1 &
-TUNNEL_PID=$!
-
-# Wait for tunnel URL
-for i in $(seq 1 15); do
-  TUNNEL_URL=$(grep -o 'https://[^ ]*trycloudflare.com' /tmp/orbit-tunnel.log 2>/dev/null | head -1)
-  if [ -n "$TUNNEL_URL" ]; then
-    break
-  fi
-  sleep 1
-done
+# Start tunnel (only if not already running)
+if pgrep -f "cloudflared tunnel run" > /dev/null 2>&1; then
+  echo "[2/2] Tunnel already running"
+else
+  echo "[2/2] Starting Cloudflare tunnel..."
+  nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
+  TUNNEL_PID=$!
+  sleep 2
+  echo "  Tunnel started (PID $TUNNEL_PID)"
+fi
 
 echo ""
 echo "=================================="
-if [ -n "$TUNNEL_URL" ]; then
-  echo "  LIVE AT: $TUNNEL_URL"
-else
-  echo "  Tunnel still starting... check /tmp/orbit-tunnel.log"
-  echo "  Local: http://localhost:5000"
-fi
+echo "  LIVE AT: https://$DOMAIN"
 echo "=================================="
 echo ""
 echo "  Login: hayden / admin123"
 echo "  Broker PID: $BROKER_PID"
-echo "  Tunnel PID: $TUNNEL_PID"
 echo ""
 echo "  Logs:"
 echo "    Broker: /tmp/orbit-broker.log"

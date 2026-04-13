@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC1uA2s8g3qw0q3hNw2FJLFJfBhVY1lNww",
-  authDomain: "orbitai-dashboard.firebaseapp.com",
+  authDomain: "orbitai.work",
   projectId: "orbitai-dashboard",
   storageBucket: "orbitai-dashboard.firebasestorage.app",
   messagingSenderId: "1094212533869",
