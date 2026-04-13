@@ -356,6 +356,31 @@ api.patch("/teams/:id", authMiddleware, async (c) => {
   return c.json(updated);
 });
 
+// Team rules
+api.get("/teams/:id/rules", authMiddleware, (c) => {
+  const { id } = c.req.param();
+  const team = db.query("SELECT rules FROM teams WHERE id = ?").get(id) as any;
+  if (!team) return c.json({ error: "Team not found" }, 404);
+  return c.json({ rules: team.rules || "" });
+});
+
+api.put("/teams/:id/rules", authMiddleware, async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const { rules } = await c.req.json<{ rules: string }>();
+
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(id, user.sub) as { role: string } | null;
+
+  if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+    return c.json({ error: "Only team owners and admins can edit team rules" }, 403);
+  }
+
+  db.run("UPDATE teams SET rules = ? WHERE id = ?", [rules, id]);
+  return c.json({ ok: true });
+});
+
 api.delete("/teams/:id/members/:userId", authMiddleware, (c) => {
   const user = c.get("user") as JWTPayload;
   const { id, userId } = c.req.param();
@@ -795,6 +820,27 @@ teamApi.get("/projects/:id", (c) => {
   const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id);
   if (!project) return c.json({ error: "Project not found" }, 404);
   return c.json(project);
+});
+
+// Project rules
+teamApi.get("/projects/:id/rules", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const project = db.query("SELECT rules FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id) as any;
+  if (!project) return c.json({ error: "Project not found" }, 404);
+  return c.json({ rules: project.rules || "" });
+});
+
+teamApi.put("/projects/:id/rules", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const { rules } = await c.req.json<{ rules: string }>();
+
+  const project = db.query("SELECT id FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  db.run("UPDATE projects SET rules = ? WHERE id = ?", [rules, id]);
+  return c.json({ ok: true });
 });
 
 teamApi.delete("/projects/:id", (c) => {
