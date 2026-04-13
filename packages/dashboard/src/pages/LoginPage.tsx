@@ -140,6 +140,25 @@ export function LoginPage() {
             <br />No separate registration needed.
           </p>
         </div>
+
+        {/* Download desktop app */}
+        <div className="mt-4 text-center">
+          <a
+            href="https://github.com/hhowell116/orbit-ai/releases/latest"
+            target="_blank"
+            rel="noopener"
+            className="inline-flex items-center gap-2 text-xs px-4 py-2 rounded-lg transition-all"
+            style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)", background: "rgba(21, 27, 35, 0.6)", backdropFilter: "blur(10px)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(167, 139, 250, 0.3)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+              <path d="M2.75 14A1.75 1.75 0 011 12.25v-2.5a.75.75 0 011.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25v-2.5a.75.75 0 011.5 0v2.5A1.75 1.75 0 0113.25 14H2.75z"/>
+              <path d="M7.25 7.689V2a.75.75 0 011.5 0v5.689l1.97-1.969a.749.749 0 111.06 1.06l-3.25 3.25a.749.749 0 01-1.06 0L4.22 6.78a.749.749 0 111.06-1.06l1.97 1.969z"/>
+            </svg>
+            Download Desktop App
+          </a>
+        </div>
       </div>
     </div>
   );
