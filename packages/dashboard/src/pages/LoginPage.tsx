@@ -34,7 +34,6 @@ export function LoginPage() {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
-
       const data = await broker.googleAuth(idToken);
       await handlePostLogin(data);
     } catch (err: any) {
@@ -49,25 +48,54 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center relative" style={{ background: "var(--color-bg-base)" }}>
       <OrbitalBackground />
+
       <div className="w-full max-w-sm relative" style={{ zIndex: 1 }}>
-        <div className="rounded-xl p-10 shadow-2xl" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+        {/* Card glow effect */}
+        <div className="absolute -inset-1 rounded-2xl opacity-20 blur-xl" style={{
+          background: "linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(250, 178, 131, 0.3), rgba(92, 156, 245, 0.3))",
+        }} />
+
+        <div className="relative rounded-xl p-10 shadow-2xl" style={{
+          background: "linear-gradient(180deg, rgba(21, 27, 35, 0.95), rgba(13, 17, 23, 0.98))",
+          border: "1px solid rgba(167, 139, 250, 0.15)",
+          backdropFilter: "blur(20px)",
+        }}>
           {/* Logo */}
           <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-24 h-24 mb-5">
-              <svg viewBox="0 0 200 200" className="w-24 h-24">
+            <div className="inline-flex items-center justify-center w-28 h-28 mb-5 relative">
+              {/* Logo glow */}
+              <div className="absolute inset-0 rounded-full" style={{
+                background: "radial-gradient(circle, rgba(250, 178, 131, 0.15) 0%, transparent 70%)",
+                filter: "blur(10px)",
+              }} />
+              <svg viewBox="0 0 200 200" className="w-28 h-28 relative">
                 <defs>
-                  <radialGradient id="loginPlanet" cx="40%" cy="38%">
-                    <stop offset="0%" stopColor="#fab283" />
+                  <radialGradient id="loginPlanet" cx="35%" cy="35%">
+                    <stop offset="0%" stopColor="#fbc4a0" />
+                    <stop offset="50%" stopColor="#fab283" />
                     <stop offset="100%" stopColor="#9d7cd8" />
                   </radialGradient>
+                  <radialGradient id="loginShine" cx="30%" cy="30%">
+                    <stop offset="0%" stopColor="rgba(255,255,255,0.25)" />
+                    <stop offset="100%" stopColor="transparent" />
+                  </radialGradient>
                 </defs>
-                <circle cx="100" cy="100" r="50" fill="url(#loginPlanet)" />
-                <ellipse cx="100" cy="100" rx="80" ry="20" fill="none" stroke="#fab283" strokeWidth="3" transform="rotate(-20 100 100)" opacity="0.7" />
-                <circle cx="155" cy="60" r="8" fill="#5c9cf5" opacity="0.9" />
-                <circle cx="52" cy="142" r="5" fill="#9d7cd8" opacity="0.7" />
+                <circle cx="100" cy="100" r="45" fill="url(#loginPlanet)" />
+                <circle cx="100" cy="100" r="45" fill="url(#loginShine)" />
+                {/* Ring */}
+                <ellipse cx="100" cy="100" rx="75" ry="18" fill="none" stroke="rgba(250,178,131,0.5)" strokeWidth="2.5" transform="rotate(-20 100 100)" />
+                <ellipse cx="100" cy="100" rx="75" ry="18" fill="none" stroke="rgba(250,178,131,0.15)" strokeWidth="6" transform="rotate(-20 100 100)" />
+                {/* Moons */}
+                <circle cx="155" cy="58" r="7" fill="#7dd3fc" opacity="0.8" />
+                <circle cx="155" cy="58" r="3" fill="rgba(255,255,255,0.3)" />
+                <circle cx="50" cy="140" r="5" fill="#a78bfa" opacity="0.6" />
               </svg>
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight" style={{ color: "var(--color-primary)" }}>
+            <h1 className="text-3xl font-bold tracking-tight" style={{
+              background: "linear-gradient(135deg, var(--color-primary), #c084fc)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}>
               Orbit AI
             </h1>
             <p className="mt-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>
@@ -79,15 +107,14 @@ export function LoginPage() {
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full py-3 px-4 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-3"
+            className="w-full py-3.5 px-4 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-3"
             style={{
               background: loading ? "var(--color-bg-hover)" : "var(--color-bg-elevated)",
               border: "1px solid var(--color-border)",
               color: loading ? "var(--color-text-muted)" : "var(--color-text-primary)",
-              cursor: loading ? "wait" : "pointer",
             }}
-            onMouseEnter={(e) => { if (!loading) e.currentTarget.style.borderColor = "var(--color-primary)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
+            onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.borderColor = "rgba(167, 139, 250, 0.4)"; e.currentTarget.style.boxShadow = "0 0 20px rgba(139, 92, 246, 0.1)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.boxShadow = "none"; }}
           >
             {loading ? (
               <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
