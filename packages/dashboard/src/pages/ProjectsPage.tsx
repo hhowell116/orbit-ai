@@ -336,6 +336,17 @@ export function ProjectsPage() {
           >
             Ctrl+K
           </kbd>
+          <button
+            onClick={() => navigate("/connections")}
+            className="p-1.5 rounded-lg transition-colors"
+            title="Connections"
+            style={{ color: "var(--color-text-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "transparent"; }}>
+            <svg viewBox="0 0 16 16" className="w-4 h-4" fill="currentColor">
+              <path d="M1.5 3A1.5 1.5 0 000 4.5v1A1.5 1.5 0 001.5 7h1A1.5 1.5 0 004 5.5v-1A1.5 1.5 0 002.5 3h-1zM5 4.5a.5.5 0 01.5-.5h9a.5.5 0 010 1h-9a.5.5 0 01-.5-.5zM5.5 10a.5.5 0 000 1h9a.5.5 0 000-1h-9zM12 4.5A1.5 1.5 0 0113.5 3h1A1.5 1.5 0 0116 4.5v1A1.5 1.5 0 0114.5 7h-1A1.5 1.5 0 0112 5.5v-1zM0 10.5A1.5 1.5 0 011.5 9h1A1.5 1.5 0 014 10.5v1A1.5 1.5 0 012.5 13h-1A1.5 1.5 0 010 11.5v-1z"/>
+            </svg>
+          </button>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
             <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>{user?.display_name}</span>
@@ -396,7 +407,7 @@ export function ProjectsPage() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 p-6 max-w-5xl mx-auto">
+        <main className="flex-1 p-6">
           {/* Connection error */}
           {error && (
             <div
@@ -484,12 +495,12 @@ export function ProjectsPage() {
           </div>
 
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[1, 2, 3].map((i) => (
                 <div
                   key={i}
-                  className="rounded-lg p-5 animate-pulse"
-                  style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)", height: "140px" }}
+                  className="rounded-xl p-6 animate-pulse"
+                  style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)", height: "180px" }}
                 />
               ))}
             </div>
@@ -504,12 +515,12 @@ export function ProjectsPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {projects.map((project) => (
                 <button
                   key={project.id}
                   onClick={() => navigate(`/project/${project.id}`)}
-                  className="text-left rounded-lg p-5 transition-all group"
+                  className="text-left rounded-xl p-6 transition-all group"
                   style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = "var(--color-primary)";
@@ -520,8 +531,8 @@ export function ProjectsPage() {
                     e.currentTarget.style.background = "var(--color-bg-surface)";
                   }}
                 >
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-medium text-sm" style={{ color: "var(--color-text-primary)" }}>
+                  <div className="flex items-start justify-between mb-3">
+                    <h3 className="font-semibold text-base" style={{ color: "var(--color-text-primary)" }}>
                       {project.name}
                     </h3>
                     <div className="flex items-center gap-2">
@@ -546,7 +557,7 @@ export function ProjectsPage() {
                     </div>
                   </div>
 
-                  <p className="text-xs mb-4 line-clamp-2" style={{ color: "var(--color-text-secondary)" }}>
+                  <p className="text-sm mb-5 line-clamp-2" style={{ color: "var(--color-text-secondary)" }}>
                     {project.description || "No description"}
                   </p>
 

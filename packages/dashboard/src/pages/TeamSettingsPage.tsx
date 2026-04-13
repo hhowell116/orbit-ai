@@ -31,6 +31,8 @@ export function TeamSettingsPage() {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const [transferTarget, setTransferTarget] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const isOwner = activeTeam?.role === "owner";
@@ -67,6 +69,26 @@ export function TeamSettingsPage() {
     if (!teamId) return;
     await broker.updateMemberRole(teamId, userId, role);
     setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role } : m)));
+  }
+
+  async function handleTransferOwnership() {
+    if (!teamId || !transferTarget) return;
+    const target = members.find((m) => m.id === transferTarget);
+    if (!target) return;
+    if (!confirm(`Transfer ownership to ${target.display_name}? You will become an admin.`)) return;
+    setTransferring(true);
+    try {
+      await broker.transferOwnership(teamId, transferTarget);
+      // Refresh members to show updated roles
+      const updated = await broker.getTeamMembers(teamId);
+      setMembers(updated);
+      setTransferTarget("");
+      alert("Ownership transferred successfully. You are now an admin.");
+    } catch (err: any) {
+      alert(err.message || "Failed to transfer ownership");
+    } finally {
+      setTransferring(false);
+    }
   }
 
   function copyCode(code: string) {
@@ -171,6 +193,37 @@ export function TeamSettingsPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+            {/* Transfer Ownership */}
+            {isOwner && members.filter((m) => m.id !== user?.id).length > 0 && (
+              <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid rgba(224, 108, 117, 0.2)" }}>
+                <h2 className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: "var(--color-error)" }}>
+                  Transfer Ownership
+                </h2>
+                <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>
+                  Transfer team ownership to another member. You will become an admin.
+                </p>
+                <div className="flex gap-2">
+                  <select
+                    value={transferTarget}
+                    onChange={(e) => setTransferTarget(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}>
+                    <option value="">Select a member...</option>
+                    {members.filter((m) => m.id !== user?.id).map((m) => (
+                      <option key={m.id} value={m.id}>{m.display_name} (@{m.username})</option>
+                    ))}
+                  </select>
+                  <button onClick={handleTransferOwnership} disabled={transferring || !transferTarget}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{
+                      background: transferring || !transferTarget ? "var(--color-bg-hover)" : "var(--color-error)",
+                      color: transferring || !transferTarget ? "var(--color-text-muted)" : "#fff",
+                    }}>
+                    {transferring ? "Transferring..." : "Transfer"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

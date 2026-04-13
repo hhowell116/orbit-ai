@@ -53,6 +53,8 @@ export function useBroker() {
       brokerFetch(`/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
     updateMemberRole: (teamId: string, userId: string, role: string) =>
       brokerFetch(`/teams/${teamId}/members/${userId}`, { method: "PATCH", body: JSON.stringify({ role }) }),
+    transferOwnership: (teamId: string, newOwnerId: string) =>
+      brokerFetch(`/teams/${teamId}/transfer`, { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }),
 
     // Invites
     createInvite: (teamId: string, opts?: { max_uses?: number; expires_at?: string }) =>
