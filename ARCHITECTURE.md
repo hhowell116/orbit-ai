@@ -9,18 +9,83 @@ Orbit AI is a multi-tenant, team-based AI coding platform. Teams sign up, create
 ## Infrastructure Overview
 
 ```
-[Browser] --HTTPS--> [Cloudflare Tunnel] --HTTP--> [Broker :5000]
-                                                     |
-                                            +--------+--------+
-                                            |                 |
-                                      [Dashboard]       [SQLite DB]
-                                     (static files)    (team.db)
-                                                            |
-                                                     [Anthropic API]
-                                                      (Claude chat)
+[Browser] --HTTPS--> [Cloudflare DNS] --> [Cloudflare Named Tunnel] --HTTP--> [Broker :5000]
+                      (orbitai.work)       (persistent connection)                |
+                                                                       +--------+--------+
+                                                                       |                 |
+                                                                 [Dashboard]       [SQLite DB]
+                                                                (static files)    (team.db)
+                                                                                       |
+                                                                                [Anthropic API]
+                                                                                 (Claude chat)
 ```
 
-**Everything runs on one VM.** The Bun-based broker serves both the API and the React dashboard. A Cloudflare tunnel exposes it to the internet with HTTPS. Firebase is used only for Google OAuth (no hosting).
+**Everything runs on one VM.** The Bun-based broker serves both the API and the React dashboard. A Cloudflare named tunnel exposes it to the internet with HTTPS. Firebase is used only for Google OAuth (no hosting).
+
+---
+
+## Why Cloudflare (Not Firebase, Vercel, etc.)
+
+The VM sits behind a corporate firewall — no inbound connections allowed. We need a **tunnel** that reaches out from the VM to the internet. This rules out traditional hosting.
+
+**Why not Firebase Hosting?** Firebase only serves static files (HTML/CSS/JS). Our broker is a live Bun/Hono server with a SQLite database — Firebase can't run that. Even if we hosted the dashboard on Firebase, the browser still needs to reach the broker API on the VM, which means we'd still need a tunnel. Splitting the dashboard and API across two origins adds CORS complexity for no benefit.
+
+**Why not Vercel/Render/Deno Deploy?** These are cloud platforms that run your code on their infrastructure. Our app needs to run on the VM specifically because that's where the projects, database, and OpenCode instances live. We can't move the backend to the cloud.
+
+**Why Cloudflare specifically?**
+1. **Cloudflare Tunnel** is the only free, production-grade tunnel service that provides a permanent URL. The tunnel makes an outbound connection from the VM to Cloudflare's network, bypassing the firewall entirely.
+2. **The domain must be on Cloudflare** because the tunnel routing works through Cloudflare's DNS. When someone visits `orbitai.work`, Cloudflare's DNS knows to send that traffic through the tunnel to our VM. A domain on another registrar can't do this without transferring DNS to Cloudflare first.
+3. **One URL serves everything** — both the React dashboard and the API come from the same origin (`https://orbitai.work`), so there are no CORS issues, no split architecture, and no hardcoded URLs in the frontend code.
+
+**Why not a free URL?** Free tunnel services (ngrok, trycloudflare.com) either give random/ugly URLs that change on restart, inject interstitial warning pages, or have severe bandwidth limits. A custom domain (~$6.50/yr for `.us`) gives us a permanent, clean, professional URL with zero restrictions.
+
+---
+
+## Domain & Tunnel Setup
+
+**Domain:** `orbitai.work` (registered on Cloudflare Registrar, ~$6.50/yr)
+**Tunnel:** Named tunnel `orbit-ai` (free, permanent, unlimited bandwidth)
+**Config:** `~/.cloudflared/config.yml` on the VM
+
+### How the tunnel works
+
+```
+1. VM runs: cloudflared tunnel run orbit-ai
+2. cloudflared makes an OUTBOUND connection to Cloudflare's edge (firewall allows this)
+3. Cloudflare DNS has a CNAME: orbitai.work → <tunnel-uuid>.cfargotunnel.com
+4. When a browser visits https://orbitai.work:
+   - Cloudflare DNS resolves it
+   - Cloudflare routes the request through the existing tunnel connection
+   - The request arrives at the broker on localhost:5000
+   - The response flows back the same way
+```
+
+The tunnel stays running permanently. On deploys, only the broker restarts — the tunnel connection is unaffected, so there is zero downtime for DNS/URL changes.
+
+### One-time setup (run once on the VM)
+
+```bash
+./setup-tunnel.sh
+# This does:
+# 1. cloudflared tunnel login (authenticates with Cloudflare)
+# 2. cloudflared tunnel create orbit-ai (creates persistent tunnel)
+# 3. Writes ~/.cloudflared/config.yml
+# 4. cloudflared tunnel route dns orbit-ai orbitai.work (creates DNS record)
+```
+
+### Tunnel config (~/.cloudflared/config.yml)
+
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: ~/.cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: orbitai.work
+    service: http://localhost:5000
+  - hostname: www.orbitai.work
+    service: http://localhost:5000
+  - service: http_status:404
+```
 
 ---
 
@@ -37,7 +102,8 @@ Orbit AI is a multi-tenant, team-based AI coding platform. Teams sign up, create
 | Frontend | React 19 + Vite 8 + Tailwind 4 | Dashboard SPA |
 | State | Zustand 5.0 | Auth state + sessionStorage persistence |
 | Routing | react-router-dom 7.14 | SPA routing with auth guards |
-| Tunnel | cloudflared | Free HTTPS tunnel to VM |
+| Tunnel | cloudflared (named tunnel) | Permanent HTTPS tunnel to VM |
+| Domain | orbitai.work (Cloudflare) | Clean permanent URL |
 
 ---
 
@@ -58,7 +124,7 @@ curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cl
   -o ~/.local/bin/cloudflared && chmod +x ~/.local/bin/cloudflared
 ```
 
-### Install & Run
+### First-time Install
 ```bash
 git clone https://github.com/hhowell116/orbit-ai.git
 cd orbit-ai
@@ -66,7 +132,7 @@ cd orbit-ai
 # Install dependencies
 npm install                                    # root workspace
 cd packages/broker && bun install && cd ../..  # broker deps
-cd packages/dashboard && npm install && cd ../.  # dashboard deps
+cd packages/dashboard && npm install && cd ../..  # dashboard deps
 
 # Seed database (creates test users + team)
 cd packages/broker && bun run src/seed.ts && cd ../..
@@ -74,13 +140,31 @@ cd packages/broker && bun run src/seed.ts && cd ../..
 # Build dashboard
 cd packages/dashboard && npx vite build && cd ../..
 
+# One-time tunnel setup
+./setup-tunnel.sh
+
 # Start everything
 ./start.sh
 ```
 
-### start.sh / stop.sh
-- `start.sh` — Kills old processes, starts broker on :5000, starts Cloudflare tunnel, prints the public URL
-- `stop.sh` — Kills broker and tunnel
+### Scripts
+
+- `setup-tunnel.sh` — One-time: authenticates with Cloudflare, creates named tunnel, sets up DNS
+- `start.sh` — Starts broker on :5000, starts tunnel if not already running. Prints `https://orbitai.work`
+- `stop.sh` — Stops broker only (tunnel keeps running). Use `--all` to stop both.
+- `auto-deploy.sh` — Polls GitHub every 60s, pulls new commits, rebuilds dashboard, restarts broker. Tunnel is never restarted.
+
+### Auto-deploy flow
+```
+Developer pushes to main → GitHub
+  ↓ (within 60 seconds)
+auto-deploy.sh detects new commits
+  ↓
+git pull → npm/bun install (if deps changed) → vite build → restart broker
+  ↓
+Site is live at https://orbitai.work with new changes
+Tunnel stays connected — no URL change, no downtime
+```
 
 ---
 
@@ -320,19 +404,11 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 **Project:** `orbitai-dashboard`
 **Used for:** Google OAuth only (hosting disabled)
 
-Firebase Auth must have Google sign-in enabled and the tunnel domain added to authorized domains.
+Firebase Auth must have:
+- Google sign-in enabled
+- `orbitai.work` added to authorized domains (one-time, permanent)
 
-Config lives in `packages/dashboard/src/firebase.ts`.
-
----
-
-## Cloudflare Tunnel
-
-**Type:** Ad-hoc (free, no domain required)
-**Command:** `cloudflared tunnel --url http://localhost:5000`
-**URL:** Random `*.trycloudflare.com` subdomain (changes on restart)
-
-The tunnel URL must be added to Firebase Auth authorized domains each time it changes.
+Config lives in `packages/dashboard/src/firebase.ts` with `authDomain: "orbitai.work"`.
 
 ---
 
@@ -355,7 +431,7 @@ orbit-ai/
 │   │   │   ├── components/     ← ChatWindow, MessageBubble, etc.
 │   │   │   ├── hooks/          ← useBroker, useOpenCode
 │   │   │   ├── stores/         ← authStore (Zustand)
-│   │   │   ├── firebase.ts     ← Google Auth config
+│   │   │   ├── firebase.ts     ← Google Auth config (authDomain: orbitai.work)
 │   │   │   ├── App.tsx         ← Router
 │   │   │   ├── main.tsx        ← Entry point
 │   │   │   └── index.css       ← Tailwind + theme variables
@@ -363,9 +439,11 @@ orbit-ai/
 │   │   └── package.json
 │   └── opencode-plugin/        ← Stub for file lock enforcement
 ├── projects/                   ← Cloned project repos stored here
-├── start.sh                    ← Start broker + tunnel
-├── stop.sh                     ← Stop everything
-├── firebase.json               ← Firebase hosting config
+├── setup-tunnel.sh             ← One-time: create named Cloudflare tunnel
+├── start.sh                    ← Start broker + tunnel (if not running)
+├── stop.sh                     ← Stop broker (tunnel keeps running)
+├── auto-deploy.sh              ← Polls GitHub, rebuilds + restarts broker on new commits
+├── firebase.json               ← Firebase config (OAuth only)
 ├── .firebaserc                 ← Firebase project: orbitai-dashboard
 └── package.json                ← Workspace root
 ```
@@ -399,4 +477,17 @@ kill $(lsof -ti:5000) && cd packages/broker && bun run src/index.ts &
 
 # Or just use the scripts
 ./stop.sh && ./start.sh
+```
+
+### Deploy to production
+```bash
+# Just push to main — the VM handles the rest
+git add . && git commit -m "your changes" && git push
+
+# auto-deploy.sh on the VM will:
+# 1. Detect the new commit within 60 seconds
+# 2. git pull
+# 3. Rebuild dashboard (npx vite build)
+# 4. Restart broker
+# 5. Tunnel stays connected — site is live at https://orbitai.work
 ```

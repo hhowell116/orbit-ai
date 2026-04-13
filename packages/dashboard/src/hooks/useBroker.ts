@@ -1,9 +1,7 @@
 import { useAuthStore } from "../stores/authStore";
 
-// Use tunnel URL in production, relative path in dev
-const BROKER_URL = window.location.hostname === "localhost"
-  ? "/api"
-  : "https://spaces-run-viii-relying.trycloudflare.com/api";
+// Always use relative path — broker serves the dashboard on the same origin
+const BROKER_URL = "/api";
 
 async function brokerFetch(path: string, options: RequestInit = {}) {
   const token = useAuthStore.getState().token;
