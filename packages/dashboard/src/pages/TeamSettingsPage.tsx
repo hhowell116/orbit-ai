@@ -33,6 +33,9 @@ export function TeamSettingsPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState("");
   const [transferring, setTransferring] = useState(false);
+  const [teamRules, setTeamRules] = useState("");
+  const [rulesSaving, setRulesSaving] = useState(false);
+  const [rulesMsg, setRulesMsg] = useState("");
 
   const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const isOwner = activeTeam?.role === "owner";
@@ -41,11 +44,27 @@ export function TeamSettingsPage() {
     if (!teamId) return;
     Promise.all([
       broker.getTeamMembers(teamId).then(setMembers),
+      broker.getTeamRules(teamId).then((d: any) => setTeamRules(d.rules || "")),
       isOwnerOrAdmin ? broker.getInvites(teamId).then(setInvites) : Promise.resolve(),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [teamId]);
+
+  async function handleSaveRules() {
+    if (!teamId) return;
+    setRulesSaving(true);
+    setRulesMsg("");
+    try {
+      await broker.setTeamRules(teamId, teamRules);
+      setRulesMsg("Saved!");
+      setTimeout(() => setRulesMsg(""), 3000);
+    } catch (err: any) {
+      setRulesMsg(err.message || "Failed to save");
+    } finally {
+      setRulesSaving(false);
+    }
+  }
 
   async function handleGenerateInvite() {
     if (!teamId) return;
@@ -118,6 +137,43 @@ export function TeamSettingsPage() {
           <div className="text-center py-12 text-sm" style={{ color: "var(--color-text-muted)" }}>Loading...</div>
         ) : (
           <div className="space-y-6">
+            {/* Team Rules */}
+            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                    Team Rules
+                  </h2>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+                    Instructions Claude must follow for all projects in this team. Sent as a system prompt.
+                  </p>
+                </div>
+                {rulesMsg && (
+                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
+                )}
+              </div>
+              <textarea
+                value={teamRules}
+                onChange={(e) => setTeamRules(e.target.value)}
+                rows={10}
+                className="w-full px-3 py-2 rounded-lg text-sm font-mono focus:outline-none resize-y"
+                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.5" }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                placeholder={`# Team Rules for Claude\n\n## Token Efficiency\n- Be concise. Avoid unnecessary explanations.\n- Only read files that are directly relevant to the task.\n- Do not repeat back large blocks of code — reference by filename and line numbers.\n- Summarize changes rather than showing full diffs.\n\n## Code Standards\n- Follow existing code style and conventions.\n- Do not add comments unless the logic is non-obvious.\n- Do not refactor code that isn't related to the current task.\n\n## Behavior\n- Ask clarifying questions before making large changes.\n- Always explain what you changed and why in 1-2 sentences.`}
+                disabled={!isOwnerOrAdmin}
+              />
+              {isOwnerOrAdmin && (
+                <div className="flex justify-end mt-2">
+                  <button onClick={handleSaveRules} disabled={rulesSaving}
+                    className="text-xs px-4 py-1.5 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    {rulesSaving ? "Saving..." : "Save Rules"}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Members */}
             <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
               <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>

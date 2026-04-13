@@ -89,6 +89,12 @@ export function useBroker() {
       return res.json();
     },
     getProjectLocks: (projectId: string) => brokerFetch(`/locks/${projectId}`),
+    getProjectRules: (projectId: string) => brokerFetch(`/projects/${projectId}/rules`),
+    setProjectRules: (projectId: string, rules: string) =>
+      brokerFetch(`/projects/${projectId}/rules`, { method: "PUT", body: JSON.stringify({ rules }) }),
+    getTeamRules: (teamId: string) => brokerFetch(`/teams/${teamId}/rules`),
+    setTeamRules: (teamId: string, rules: string) =>
+      brokerFetch(`/teams/${teamId}/rules`, { method: "PUT", body: JSON.stringify({ rules }) }),
 
     // Git operations
     getGitStatus: (projectId: string) => brokerFetch(`/projects/${projectId}/git/status`),

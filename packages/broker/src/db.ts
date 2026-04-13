@@ -158,6 +158,14 @@ function runMigrations() {
   if (!teamCols.find((c) => c.name === "github_token")) {
     db.exec("ALTER TABLE teams ADD COLUMN github_token TEXT");
   }
+  if (!teamCols.find((c) => c.name === "rules")) {
+    db.exec("ALTER TABLE teams ADD COLUMN rules TEXT");
+  }
+
+  // Project rules
+  if (!projectCols.find((c) => c.name === "rules")) {
+    db.exec("ALTER TABLE projects ADD COLUMN rules TEXT");
+  }
 }
 
 runMigrations();

@@ -50,6 +50,11 @@ export function ProjectPage() {
   const [loadError, setLoadError] = useState("");
   const [claudeConnected, setClaudeConnected] = useState<boolean | null>(null);
 
+  // Rules state
+  const [projectRules, setProjectRules] = useState("");
+  const [showRulesEditor, setShowRulesEditor] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
+
   // Git state
   const [gitStatus, setGitStatus] = useState<any>(null);
   const [commitMsg, setCommitMsg] = useState("");
@@ -67,7 +72,21 @@ export function ProjectPage() {
     broker.rawFetch("/connections/claude/status")
       .then((data: any) => setClaudeConnected(data.connected))
       .catch(() => setClaudeConnected(false));
+    broker.getProjectRules(projectId)
+      .then((d: any) => setProjectRules(d.rules || ""))
+      .catch(() => {});
   }, [projectId]);
+
+  async function handleSaveProjectRules() {
+    if (!projectId) return;
+    setRulesSaving(true);
+    try {
+      await broker.setProjectRules(projectId, projectRules);
+      setShowRulesEditor(false);
+    } catch {} finally {
+      setRulesSaving(false);
+    }
+  }
 
   // Create or load session
   useEffect(() => {
@@ -273,6 +292,45 @@ export function ProjectPage() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Project Rules */}
+          <div className="p-4" style={{ borderBottom: "1px solid var(--color-border)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>Project Rules</h3>
+              <button onClick={() => setShowRulesEditor(!showRulesEditor)}
+                className="text-xs px-2 py-0.5 rounded transition-colors"
+                style={{ color: "var(--color-text-muted)", background: "var(--color-bg-hover)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                {showRulesEditor ? "Close" : projectRules ? "Edit" : "Add"}
+              </button>
+            </div>
+            {showRulesEditor ? (
+              <div className="space-y-2">
+                <textarea
+                  value={projectRules}
+                  onChange={(e) => setProjectRules(e.target.value)}
+                  rows={6}
+                  className="w-full px-2 py-1.5 rounded text-xs font-mono focus:outline-none resize-y"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.5" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="# Project-specific rules for Claude&#10;&#10;- This project uses React + TypeScript&#10;- Use functional components only&#10;- Tests go in __tests__/ directories"
+                />
+                <button onClick={handleSaveProjectRules} disabled={rulesSaving}
+                  className="w-full text-xs py-1.5 rounded-lg font-medium"
+                  style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                  {rulesSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            ) : projectRules ? (
+              <p className="text-xs line-clamp-3 font-mono" style={{ color: "var(--color-text-muted)", whiteSpace: "pre-wrap" }}>
+                {projectRules.slice(0, 150)}{projectRules.length > 150 ? "..." : ""}
+              </p>
+            ) : (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No project rules set</p>
             )}
           </div>
 
