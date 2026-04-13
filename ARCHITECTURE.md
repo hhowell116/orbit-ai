@@ -198,7 +198,7 @@ Tunnel stays connected — no URL change, no downtime
 | name | TEXT | Team display name |
 | slug | TEXT UNIQUE | URL-safe name |
 | owner_id | TEXT FK→users | Team creator |
-| anthropic_api_key | TEXT | Claude API key for the team |
+| anthropic_api_key | TEXT | DEPRECATED — connections are now per-user |
 | created_at | DATETIME | |
 
 ### team_members
@@ -284,6 +284,27 @@ Tunnel stays connected — no URL change, no downtime
 | model | TEXT | |
 | recorded_at | DATETIME | |
 
+### user_connections
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| user_id | TEXT FK→users | Connection owner |
+| provider | TEXT | `claude` or `github` |
+| token | TEXT | Encrypted at rest (AES-256-GCM) |
+| created_at | DATETIME | |
+| updated_at | DATETIME | |
+| UNIQUE(user_id, provider) | | One connection per provider per user |
+
+---
+
+## Security — Token Storage
+
+API keys and tokens (Claude API key, GitHub PAT) are stored **per-user** in the `user_connections` table. Each user manages their own connections — no one else on the team can see or access them.
+
+**Encryption at rest:** All tokens are encrypted using AES-256-GCM before being written to the database. The encryption key is derived from the `BROKER_ENCRYPTION_KEY` environment variable on the server. The database only ever contains ciphertext — even with direct access to `team.db`, tokens cannot be read without the server-side key.
+
+**API isolation:** Connection routes (`GET/PUT/DELETE /api/connections/:provider`) are scoped to the authenticated user's ID from their JWT. There is no endpoint that returns another user's tokens. The `GET` status endpoints only return `{ connected: true/false }`, never the token itself.
+
 ---
 
 ## Auth System
@@ -338,9 +359,9 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 | POST | /api/auth/select-team | Set active team, get new JWT |
 | POST | /api/teams | Create team (+ first invite code) |
 | POST | /api/teams/join | Join team with invite code |
-| GET | /api/teams/:id | Team details (has_api_key boolean) |
+| GET | /api/teams/:id | Team details |
 | GET | /api/teams/:id/members | List members |
-| PATCH | /api/teams/:id | Update team name/API key |
+| PATCH | /api/teams/:id | Update team name |
 | DELETE | /api/teams/:id/members/:userId | Remove member |
 | PATCH | /api/teams/:id/members/:userId | Change role |
 | POST | /api/teams/:id/invites | Generate invite code |
@@ -360,6 +381,11 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 | POST | /api/chat/:sessionId | Send message to Claude (SSE stream) |
 | GET | /api/locks | All file locks |
 | POST | /api/locks | Acquire lock |
+| GET | /api/connections | List user's connected providers |
+| GET | /api/connections/claude/status | Check if user has Claude connected |
+| GET | /api/connections/github/status | Check if user has GitHub connected |
+| PUT | /api/connections/:provider | Save encrypted token for provider |
+| DELETE | /api/connections/:provider | Remove connection |
 | GET | /api/activity/recent | Activity feed |
 | GET | /api/activity/stream | SSE real-time stream |
 | GET | /api/usage | Token usage stats |
@@ -373,7 +399,8 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 | /login | LoginPage | Public | Username/password + Google sign-in |
 | /signup | SignupPage | Public | Create account + Google sign-up |
 | /teams | TeamSelectionPage | Token | Create team, join with code, select team |
-| /teams/:id/settings | TeamSettingsPage | Token | Members, invites, Claude API key |
+| /teams/:id/settings | TeamSettingsPage | Token | Members, roles, invite codes |
+| /connections | ConnectionsPage | Token+Team | Personal API keys (Claude, GitHub) |
 | / | ProjectsPage | Token+Team | Dashboard: projects, stats, activity feed |
 | /project/:id | ProjectPage | Token+Team | 70/30 split: Claude chat + sidebar |
 
@@ -389,13 +416,14 @@ requireTeam     → Checks team_id exists in JWT, returns 403 if not
 
 ## Claude Chat Flow
 
-1. Team admin adds Anthropic API key in Team Settings
+1. User adds their own Anthropic API key via Connections page (encrypted and stored per-user)
 2. User opens a project → session created (`session-{projectId}`)
 3. User sends message → saved to `messages` table
-4. Broker loads conversation history, calls Anthropic API with streaming
+4. Broker retrieves user's encrypted API key, decrypts it, calls Anthropic API with streaming
 5. Response streamed token-by-token via SSE to the browser
 6. Full response saved to `messages` table
 7. Model: `claude-sonnet-4-20250514`, max_tokens: 8192
+8. If user has no Claude connection, chat shows warning: "Enable your Claude connection to start working!"
 
 ---
 
