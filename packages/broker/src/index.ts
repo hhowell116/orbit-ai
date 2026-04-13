@@ -8,6 +8,7 @@ import { authMiddleware, requireTeam, createToken, type JWTPayload } from "./aut
 import { join } from "path";
 import { randomBytes } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { encrypt, decrypt } from "./crypto";
 
 const DASHBOARD_DIR = join(import.meta.dir, "..", "..", "dashboard", "dist");
 
@@ -685,11 +686,12 @@ teamApi.put("/connections/:provider", async (c) => {
     return c.json({ error: "Token is required" }, 400);
   }
 
+  const encryptedToken = encrypt(token);
   db.run(`
     INSERT INTO user_connections (user_id, provider, token, updated_at)
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(user_id, provider) DO UPDATE SET token = ?, updated_at = CURRENT_TIMESTAMP
-  `, [user.sub, provider, token, token]);
+  `, [user.sub, provider, encryptedToken, encryptedToken]);
 
   return c.json({ ok: true, provider });
 });
