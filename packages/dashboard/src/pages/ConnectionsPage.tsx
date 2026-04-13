@@ -7,48 +7,36 @@ import { OrbitalBackground } from "../components/OrbitalBackground";
 export function ConnectionsPage() {
   const navigate = useNavigate();
   const { activeTeam } = useAuthStore();
-  const team = activeTeam;
   const broker = useBroker();
 
-  const [claudeStatus, setClaudeStatus] = useState<{ connected: boolean; method?: string; loading: boolean }>({ connected: false, loading: true });
-  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; loading: boolean }>({ connected: false, loading: true });
-  const [teamData, setTeamData] = useState<any>(null);
+  const [claudeConnected, setClaudeConnected] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // Claude form state
-  const [claudeMethod, setClaudeMethod] = useState<"api_key" | "credentials">("api_key");
+  // Claude form
   const [apiKey, setApiKey] = useState("");
   const [claudeSaving, setClaudeSaving] = useState(false);
   const [claudeMsg, setClaudeMsg] = useState("");
 
-  // GitHub form state
+  // GitHub form
   const [githubToken, setGithubToken] = useState("");
   const [githubSaving, setGithubSaving] = useState(false);
   const [githubMsg, setGithubMsg] = useState("");
 
   useEffect(() => {
-    broker.rawFetch("/connections/claude/status")
-      .then((data: any) => {
-        setClaudeStatus({ connected: data.connected, method: data.method, loading: false });
-        if (data.method) setClaudeMethod(data.method as any);
-      })
-      .catch(() => setClaudeStatus({ connected: false, loading: false }));
-
-    broker.rawFetch("/connections/github/status")
-      .then((data: any) => setGithubStatus({ connected: data.connected, loading: false }))
-      .catch(() => setGithubStatus({ connected: false, loading: false }));
-
-    if (team) {
-      broker.getTeam(team.id).then(setTeamData).catch(() => {});
-    }
+    Promise.all([
+      broker.rawFetch("/connections/claude/status").then((d: any) => setClaudeConnected(d.connected)),
+      broker.rawFetch("/connections/github/status").then((d: any) => setGithubConnected(d.connected)),
+    ]).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   async function handleSaveClaude() {
-    if (!team || !apiKey) return;
+    if (!apiKey) return;
     setClaudeSaving(true);
     setClaudeMsg("");
     try {
-      await broker.updateTeam(team.id, { anthropic_api_key: apiKey, claude_auth_method: claudeMethod });
-      setClaudeStatus({ connected: true, method: claudeMethod, loading: false });
+      await broker.saveConnection("claude", apiKey);
+      setClaudeConnected(true);
       setApiKey("");
       setClaudeMsg("Connected!");
       setTimeout(() => setClaudeMsg(""), 3000);
@@ -60,20 +48,20 @@ export function ConnectionsPage() {
   }
 
   async function handleDisconnectClaude() {
-    if (!team || !confirm("Disconnect Claude? AI chat will stop working.")) return;
+    if (!confirm("Disconnect Claude? AI chat will stop working.")) return;
     try {
-      await broker.updateTeam(team.id, { anthropic_api_key: "" });
-      setClaudeStatus({ connected: false, loading: false });
+      await broker.deleteConnection("claude");
+      setClaudeConnected(false);
     } catch {}
   }
 
   async function handleSaveGithub() {
-    if (!team || !githubToken) return;
+    if (!githubToken) return;
     setGithubSaving(true);
     setGithubMsg("");
     try {
-      await broker.updateTeam(team.id, { github_token: githubToken });
-      setGithubStatus({ connected: true, loading: false });
+      await broker.saveConnection("github", githubToken);
+      setGithubConnected(true);
       setGithubToken("");
       setGithubMsg("Connected!");
       setTimeout(() => setGithubMsg(""), 3000);
@@ -85,14 +73,14 @@ export function ConnectionsPage() {
   }
 
   async function handleDisconnectGithub() {
-    if (!team || !confirm("Disconnect GitHub?")) return;
+    if (!confirm("Disconnect GitHub?")) return;
     try {
-      await broker.updateTeam(team.id, { github_token: "" });
-      setGithubStatus({ connected: false, loading: false });
+      await broker.deleteConnection("github");
+      setGithubConnected(false);
     } catch {}
   }
 
-  const statusBadge = (connected: boolean, loading: boolean) =>
+  const statusBadge = (connected: boolean) =>
     loading ? (
       <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}>
         Checking...
@@ -122,8 +110,8 @@ export function ConnectionsPage() {
           &larr; Dashboard
         </button>
         <div className="pl-4" style={{ borderLeft: "1px solid var(--color-border)" }}>
-          <h1 className="font-medium" style={{ color: "var(--color-text-primary)" }}>Connections</h1>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Manage integrations for {team?.name || "your team"}</p>
+          <h1 className="font-medium" style={{ color: "var(--color-text-primary)" }}>My Connections</h1>
+          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Your personal API keys and integrations</p>
         </div>
       </header>
 
@@ -132,7 +120,7 @@ export function ConnectionsPage() {
 
           {/* Claude AI Connection */}
           <div className="rounded-xl overflow-hidden"
-            style={{ background: "var(--color-bg-surface)", border: `1px solid ${claudeStatus.connected ? "rgba(127,216,143,0.3)" : "var(--color-border)"}` }}>
+            style={{ background: "var(--color-bg-surface)", border: `1px solid ${claudeConnected ? "rgba(127,216,143,0.3)" : "var(--color-border)"}` }}>
 
             <div className="p-6 flex items-start gap-4">
               <div className="shrink-0">
@@ -150,15 +138,15 @@ export function ConnectionsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-medium" style={{ color: "var(--color-text-primary)" }}>Claude AI</h3>
-                  {statusBadge(claudeStatus.connected, claudeStatus.loading)}
+                  {statusBadge(claudeConnected)}
                 </div>
                 <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                  {claudeStatus.connected
-                    ? `Connected via ${claudeStatus.method === "credentials" ? "Claude credentials" : "API key"} — Claude can power AI coding sessions`
-                    : "Connect Claude to power AI coding sessions in your projects"}
+                  {claudeConnected
+                    ? "Your Claude API key is connected — you can use AI coding sessions"
+                    : "Add your Anthropic API key to power AI coding sessions"}
                 </p>
               </div>
-              {claudeStatus.connected && !claudeStatus.loading && (
+              {claudeConnected && !loading && (
                 <button onClick={handleDisconnectClaude} className="shrink-0 text-xs px-3 py-1.5 rounded-lg"
                   style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
                   Disconnect
@@ -169,13 +157,13 @@ export function ConnectionsPage() {
             {/* Features */}
             <div className="px-6 pb-4">
               <div className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>
-                {claudeStatus.connected ? "Active features" : "Features when connected"}
+                {claudeConnected ? "Active features" : "Features when connected"}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {["Read and search project files", "Edit code with AI assistance", "Run terminal commands", "Session persistence and history", "File lock coordination across team"].map((f) => (
-                  <div key={f} className="flex items-center gap-2 text-xs" style={{ color: claudeStatus.connected ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
-                    <span style={{ color: claudeStatus.connected ? "var(--color-success)" : "var(--color-text-muted)" }}>
-                      {claudeStatus.connected ? "+" : "\u00b7"}
+                  <div key={f} className="flex items-center gap-2 text-xs" style={{ color: claudeConnected ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                    <span style={{ color: claudeConnected ? "var(--color-success)" : "var(--color-text-muted)" }}>
+                      {claudeConnected ? "+" : "\u00b7"}
                     </span>
                     {f}
                   </div>
@@ -183,92 +171,37 @@ export function ConnectionsPage() {
               </div>
             </div>
 
-            {/* Auth setup (when not connected) */}
-            {!claudeStatus.connected && !claudeStatus.loading && (
+            {/* API key input */}
+            {!claudeConnected && !loading && (
               <div className="px-6 pb-6" style={{ borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
-                {/* Method toggle */}
-                <div className="flex gap-2 mb-4">
-                  <button
-                    onClick={() => setClaudeMethod("api_key")}
-                    className="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all"
+                <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
+                  Enter your Anthropic API key. Get one at{" "}
+                  <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
+                    style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
+                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                    onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                    onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                    placeholder="sk-ant-..."
+                  />
+                  <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
                     style={{
-                      background: claudeMethod === "api_key" ? "var(--color-primary-muted)" : "var(--color-bg-elevated)",
-                      color: claudeMethod === "api_key" ? "var(--color-primary)" : "var(--color-text-muted)",
-                      border: `1px solid ${claudeMethod === "api_key" ? "var(--color-primary)" : "var(--color-border)"}`,
+                      background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
+                      color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
                     }}>
-                    API Key
-                  </button>
-                  <button
-                    onClick={() => setClaudeMethod("credentials")}
-                    className="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all"
-                    style={{
-                      background: claudeMethod === "credentials" ? "var(--color-primary-muted)" : "var(--color-bg-elevated)",
-                      color: claudeMethod === "credentials" ? "var(--color-primary)" : "var(--color-text-muted)",
-                      border: `1px solid ${claudeMethod === "credentials" ? "var(--color-primary)" : "var(--color-border)"}`,
-                    }}>
-                    Claude Credentials
+                    {claudeSaving ? "Saving..." : "Connect"}
                   </button>
                 </div>
-
-                {claudeMethod === "api_key" ? (
-                  <div>
-                    <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
-                      Enter your Anthropic API key. Get one at{" "}
-                      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
-                        style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
-                        style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                        onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                        onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                        placeholder="sk-ant-..."
-                      />
-                      <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
-                        className="px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{
-                          background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
-                          color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
-                        }}>
-                        {claudeSaving ? "Saving..." : "Connect"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
-                      Enter your Claude session key from{" "}
-                      <a href="https://claude.ai" target="_blank" rel="noopener"
-                        style={{ color: "var(--color-primary)" }}>claude.ai</a>.
-                      This uses your existing Claude Pro/Max subscription instead of pay-per-token API pricing.
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
-                        style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                        onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                        onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                        placeholder="sk-..."
-                      />
-                      <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
-                        className="px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{
-                          background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
-                          color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
-                        }}>
-                        {claudeSaving ? "Saving..." : "Connect"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
+                <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
+                  Your key is stored securely and only used for your sessions. Other team members cannot see it.
+                </p>
                 {claudeMsg && (
                   <p className="text-xs mt-2" style={{ color: claudeMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{claudeMsg}</p>
                 )}
@@ -278,7 +211,7 @@ export function ConnectionsPage() {
 
           {/* GitHub Connection */}
           <div className="rounded-xl overflow-hidden"
-            style={{ background: "var(--color-bg-surface)", border: `1px solid ${githubStatus.connected ? "rgba(127,216,143,0.3)" : "var(--color-border)"}` }}>
+            style={{ background: "var(--color-bg-surface)", border: `1px solid ${githubConnected ? "rgba(127,216,143,0.3)" : "var(--color-border)"}` }}>
 
             <div className="p-6 flex items-start gap-4">
               <div className="shrink-0">
@@ -289,15 +222,15 @@ export function ConnectionsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-medium" style={{ color: "var(--color-text-primary)" }}>GitHub</h3>
-                  {statusBadge(githubStatus.connected, githubStatus.loading)}
+                  {statusBadge(githubConnected)}
                 </div>
                 <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-                  {githubStatus.connected
-                    ? "Connected — clone repos, push changes, manage branches"
-                    : "Connect GitHub to clone repositories and manage code"}
+                  {githubConnected
+                    ? "Your GitHub token is connected — clone repos, push changes, manage branches"
+                    : "Add your GitHub token to clone repositories and manage code"}
                 </p>
               </div>
-              {githubStatus.connected && !githubStatus.loading && (
+              {githubConnected && !loading && (
                 <button onClick={handleDisconnectGithub} className="shrink-0 text-xs px-3 py-1.5 rounded-lg"
                   style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
                   Disconnect
@@ -308,13 +241,13 @@ export function ConnectionsPage() {
             {/* Features */}
             <div className="px-6 pb-4">
               <div className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>
-                {githubStatus.connected ? "Active features" : "Features when connected"}
+                {githubConnected ? "Active features" : "Features when connected"}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {["Clone repositories into projects", "Push and pull changes", "Branch management", "Pull request integration"].map((f) => (
-                  <div key={f} className="flex items-center gap-2 text-xs" style={{ color: githubStatus.connected ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
-                    <span style={{ color: githubStatus.connected ? "var(--color-success)" : "var(--color-text-muted)" }}>
-                      {githubStatus.connected ? "+" : "\u00b7"}
+                  <div key={f} className="flex items-center gap-2 text-xs" style={{ color: githubConnected ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                    <span style={{ color: githubConnected ? "var(--color-success)" : "var(--color-text-muted)" }}>
+                      {githubConnected ? "+" : "\u00b7"}
                     </span>
                     {f}
                   </div>
@@ -322,8 +255,8 @@ export function ConnectionsPage() {
               </div>
             </div>
 
-            {/* GitHub token setup (when not connected) */}
-            {!githubStatus.connected && !githubStatus.loading && (
+            {/* GitHub token input */}
+            {!githubConnected && !loading && (
               <div className="px-6 pb-6" style={{ borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
                 <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
                   Enter a GitHub Personal Access Token. Create one at{" "}
@@ -351,6 +284,9 @@ export function ConnectionsPage() {
                     {githubSaving ? "Saving..." : "Connect"}
                   </button>
                 </div>
+                <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
+                  Your token is stored securely and only used for your sessions. Other team members cannot see it.
+                </p>
                 {githubMsg && (
                   <p className="text-xs mt-2" style={{ color: githubMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{githubMsg}</p>
                 )}

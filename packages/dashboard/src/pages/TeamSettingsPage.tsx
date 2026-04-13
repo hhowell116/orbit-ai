@@ -31,10 +31,6 @@ export function TeamSettingsPage() {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [apiKeySaving, setApiKeySaving] = useState(false);
-  const [apiKeyMsg, setApiKeyMsg] = useState("");
 
   const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const isOwner = activeTeam?.role === "owner";
@@ -43,37 +39,11 @@ export function TeamSettingsPage() {
     if (!teamId) return;
     Promise.all([
       broker.getTeamMembers(teamId).then(setMembers),
-      broker.getTeam(teamId).then((t: any) => setHasApiKey(!!t.has_api_key)),
       isOwnerOrAdmin ? broker.getInvites(teamId).then(setInvites) : Promise.resolve(),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [teamId]);
-
-  async function handleSaveApiKey() {
-    if (!teamId || !apiKey) return;
-    setApiKeySaving(true);
-    setApiKeyMsg("");
-    try {
-      await broker.updateTeam(teamId, { anthropic_api_key: apiKey });
-      setHasApiKey(true);
-      setApiKey("");
-      setApiKeyMsg("Connected!");
-      setTimeout(() => setApiKeyMsg(""), 3000);
-    } catch (err: any) {
-      setApiKeyMsg(err.message || "Failed to save");
-    } finally {
-      setApiKeySaving(false);
-    }
-  }
-
-  async function handleDisconnectClaude() {
-    if (!teamId || !confirm("Remove the API key? Claude chat will stop working.")) return;
-    try {
-      await broker.updateTeam(teamId, { anthropic_api_key: "" });
-      setHasApiKey(false);
-    } catch {}
-  }
 
   async function handleGenerateInvite() {
     if (!teamId) return;
@@ -126,66 +96,6 @@ export function TeamSettingsPage() {
           <div className="text-center py-12 text-sm" style={{ color: "var(--color-text-muted)" }}>Loading...</div>
         ) : (
           <div className="space-y-6">
-            {/* Connect to Claude */}
-            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-              <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
-                Connect to Claude
-              </h2>
-              {hasApiKey ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
-                    <span className="text-sm" style={{ color: "var(--color-success)" }}>Connected</span>
-                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>— Anthropic API key is set</span>
-                  </div>
-                  {isOwnerOrAdmin && (
-                    <button onClick={handleDisconnectClaude} className="text-xs px-3 py-1.5 rounded-lg"
-                      style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
-                      Disconnect
-                    </button>
-                  )}
-                </div>
-              ) : isOwnerOrAdmin ? (
-                <div>
-                  <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
-                    Enter your Anthropic API key to enable Claude in all projects. Get one at{" "}
-                    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
-                      style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
-                      style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                      onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                      onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                      placeholder="sk-ant-..."
-                    />
-                    <button onClick={handleSaveApiKey} disabled={apiKeySaving || !apiKey}
-                      className="px-4 py-2 rounded-lg text-sm font-medium"
-                      style={{
-                        background: apiKeySaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
-                        color: apiKeySaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
-                        cursor: apiKeySaving || !apiKey ? "not-allowed" : "pointer",
-                      }}>
-                      {apiKeySaving ? "Saving..." : "Connect"}
-                    </button>
-                  </div>
-                  {apiKeyMsg && (
-                    <p className="text-xs mt-2" style={{ color: apiKeyMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{apiKeyMsg}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-error)" }} />
-                  <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>Not connected</span>
-                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>— Ask your team admin to add an API key</span>
-                </div>
-              )}
-            </div>
-
             {/* Members */}
             <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
               <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>

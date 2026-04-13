@@ -47,7 +47,7 @@ export function useBroker() {
       brokerFetch("/teams/join", { method: "POST", body: JSON.stringify({ code }) }),
     getTeam: (id: string) => brokerFetch(`/teams/${id}`),
     getTeamMembers: (id: string) => brokerFetch(`/teams/${id}/members`),
-    updateTeam: (id: string, data: { name?: string; anthropic_api_key?: string; claude_auth_method?: string; github_token?: string }) =>
+    updateTeam: (id: string, data: { name?: string }) =>
       brokerFetch(`/teams/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     removeTeamMember: (teamId: string, userId: string) =>
       brokerFetch(`/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
@@ -127,6 +127,13 @@ export function useBroker() {
         }
       }
     },
+
+    // Connections (per-user)
+    getConnections: () => brokerFetch("/connections"),
+    saveConnection: (provider: string, token: string) =>
+      brokerFetch(`/connections/${provider}`, { method: "PUT", body: JSON.stringify({ token }) }),
+    deleteConnection: (provider: string) =>
+      brokerFetch(`/connections/${provider}`, { method: "DELETE" }),
 
     // Activity
     getRecentActivity: (limit = 50) => brokerFetch(`/activity/recent?limit=${limit}`),
