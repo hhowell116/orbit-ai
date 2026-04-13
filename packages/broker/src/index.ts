@@ -546,9 +546,18 @@ teamApi.post("/projects", async (c) => {
   const maxPort = db.query("SELECT MAX(opencode_port) as max_port FROM projects").get() as { max_port: number | null };
   const opencode_port = (maxPort?.max_port || 4095) + 1;
 
-  const { mkdirSync, existsSync } = await import("fs");
+  const { mkdirSync, existsSync, rmSync } = await import("fs");
   if (!existsSync(projectsDir)) mkdirSync(projectsDir, { recursive: true });
-  if (existsSync(projectPath)) return c.json({ error: "Project directory already exists" }, 409);
+
+  // If directory exists, check if it's an orphan (deleted from DB but files remain)
+  if (existsSync(projectPath)) {
+    const existing = db.query("SELECT id FROM projects WHERE path = ?").get(projectPath) as any;
+    if (existing) {
+      return c.json({ error: "A project with this name already exists" }, 409);
+    }
+    // Orphan directory — clean it up so we can recreate
+    rmSync(projectPath, { recursive: true, force: true });
+  }
 
   if (git_url) {
     const proc = Bun.spawnSync(["git", "clone", "--depth", "1", git_url, projectPath]);
