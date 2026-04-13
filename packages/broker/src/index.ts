@@ -616,6 +616,179 @@ teamApi.post("/projects/:id/upload", async (c) => {
   }
 });
 
+// --- Git operations (per-user GitHub token) ---
+
+// Helper to get project + verify access
+function getProjectForGit(c: any) {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id) as any;
+  return { user, project };
+}
+
+// Helper to get user's decrypted GitHub token
+function getUserGitHubToken(userId: string): string | null {
+  const conn = db.query("SELECT token FROM user_connections WHERE user_id = ? AND provider = 'github'").get(userId) as any;
+  if (!conn?.token) return null;
+  try { return decrypt(conn.token); } catch { return null; }
+}
+
+teamApi.get("/projects/:id/git/status", (c) => {
+  const { project } = getProjectForGit(c);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { existsSync } = require("fs");
+  if (!existsSync(join(project.path, ".git"))) {
+    return c.json({ initialized: false, message: "Not a git repository" });
+  }
+
+  const status = Bun.spawnSync(["git", "status", "--porcelain"], { cwd: project.path });
+  const branch = Bun.spawnSync(["git", "branch", "--show-current"], { cwd: project.path });
+  const remote = Bun.spawnSync(["git", "remote", "get-url", "origin"], { cwd: project.path });
+  const log = Bun.spawnSync(["git", "log", "--oneline", "-5"], { cwd: project.path });
+
+  const changes = status.stdout.toString().trim().split("\n").filter(Boolean);
+
+  return c.json({
+    initialized: true,
+    branch: branch.stdout.toString().trim() || "main",
+    remote: remote.stdout.toString().trim() || null,
+    changes: changes.length,
+    changedFiles: changes.map((line: string) => ({
+      status: line.substring(0, 2).trim(),
+      file: line.substring(3),
+    })),
+    recentCommits: log.stdout.toString().trim().split("\n").filter(Boolean),
+  });
+});
+
+teamApi.post("/projects/:id/git/init", async (c) => {
+  const { project } = getProjectForGit(c);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { remote_url } = await c.req.json<{ remote_url?: string }>();
+
+  const { existsSync } = require("fs");
+  if (!existsSync(join(project.path, ".git"))) {
+    Bun.spawnSync(["git", "init"], { cwd: project.path });
+    Bun.spawnSync(["git", "checkout", "-b", "main"], { cwd: project.path });
+  }
+
+  if (remote_url) {
+    // Remove existing origin if any, then add new
+    Bun.spawnSync(["git", "remote", "remove", "origin"], { cwd: project.path });
+    const add = Bun.spawnSync(["git", "remote", "add", "origin", remote_url], { cwd: project.path });
+    if (add.exitCode !== 0) {
+      return c.json({ error: `Failed to add remote: ${add.stderr.toString().trim()}` }, 400);
+    }
+  }
+
+  return c.json({ ok: true });
+});
+
+teamApi.post("/projects/:id/git/commit", async (c) => {
+  const { user, project } = getProjectForGit(c);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { message } = await c.req.json<{ message: string }>();
+  if (!message) return c.json({ error: "Commit message is required" }, 400);
+
+  // Stage all changes
+  const add = Bun.spawnSync(["git", "add", "-A"], { cwd: project.path });
+  if (add.exitCode !== 0) {
+    return c.json({ error: `Git add failed: ${add.stderr.toString().trim()}` }, 400);
+  }
+
+  // Check if there's anything to commit
+  const diff = Bun.spawnSync(["git", "diff", "--cached", "--quiet"], { cwd: project.path });
+  if (diff.exitCode === 0) {
+    return c.json({ error: "No changes to commit" }, 400);
+  }
+
+  // Commit with user info
+  const displayName = (user as any).display_name || (user as any).username || "Orbit AI User";
+  const commit = Bun.spawnSync([
+    "git", "commit", "-m", message,
+    "--author", `${displayName} <${(user as any).username}@orbitai.work>`,
+  ], { cwd: project.path });
+
+  if (commit.exitCode !== 0) {
+    return c.json({ error: `Commit failed: ${commit.stderr.toString().trim()}` }, 400);
+  }
+
+  return c.json({ ok: true, output: commit.stdout.toString().trim() });
+});
+
+teamApi.post("/projects/:id/git/push", async (c) => {
+  const { user, project } = getProjectForGit(c);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const token = getUserGitHubToken(user.sub);
+  if (!token) {
+    return c.json({ error: "No GitHub token configured. Add one in Connections." }, 403);
+  }
+
+  // Get the remote URL
+  const remoteProc = Bun.spawnSync(["git", "remote", "get-url", "origin"], { cwd: project.path });
+  let remoteUrl = remoteProc.stdout.toString().trim();
+  if (!remoteUrl) {
+    return c.json({ error: "No remote origin set. Initialize git with a remote URL first." }, 400);
+  }
+
+  // Inject token into the URL for auth: https://x-access-token:{token}@github.com/...
+  const authedUrl = remoteUrl.replace(
+    /https:\/\/(.*@)?github\.com/,
+    `https://x-access-token:${token}@github.com`
+  );
+
+  const branch = Bun.spawnSync(["git", "branch", "--show-current"], { cwd: project.path });
+  const branchName = branch.stdout.toString().trim() || "main";
+
+  const push = Bun.spawnSync(["git", "push", authedUrl, branchName], { cwd: project.path });
+
+  if (push.exitCode !== 0) {
+    const errMsg = push.stderr.toString().trim();
+    // Don't leak the token in error messages
+    const safeErr = errMsg.replace(token, "***");
+    return c.json({ error: `Push failed: ${safeErr}` }, 400);
+  }
+
+  return c.json({ ok: true, branch: branchName });
+});
+
+teamApi.post("/projects/:id/git/pull", async (c) => {
+  const { user, project } = getProjectForGit(c);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const token = getUserGitHubToken(user.sub);
+
+  // Get remote URL
+  const remoteProc = Bun.spawnSync(["git", "remote", "get-url", "origin"], { cwd: project.path });
+  let remoteUrl = remoteProc.stdout.toString().trim();
+  if (!remoteUrl) {
+    return c.json({ error: "No remote origin set" }, 400);
+  }
+
+  // If user has a token, use authenticated URL
+  let pullUrl = remoteUrl;
+  if (token) {
+    pullUrl = remoteUrl.replace(
+      /https:\/\/(.*@)?github\.com/,
+      `https://x-access-token:${token}@github.com`
+    );
+  }
+
+  const pull = Bun.spawnSync(["git", "pull", pullUrl, "--rebase"], { cwd: project.path });
+
+  if (pull.exitCode !== 0) {
+    const errMsg = pull.stderr.toString().trim();
+    const safeErr = token ? errMsg.replace(token, "***") : errMsg;
+    return c.json({ error: `Pull failed: ${safeErr}` }, 400);
+  }
+
+  return c.json({ ok: true, output: pull.stdout.toString().trim() });
+});
+
 teamApi.get("/projects/:id", (c) => {
   const user = c.get("user") as JWTPayload;
   const { id } = c.req.param();
