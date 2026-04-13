@@ -84,12 +84,11 @@ export function DownloadPage() {
 
       <div className="w-full max-w-lg relative" style={{ zIndex: 1 }}>
         {/* Back link */}
-        <button onClick={() => window.history.length > 1 ? window.history.back() : navigate('/login')} className="mb-4 text-sm transition-colors flex items-center gap-1"
-          style={{ color: "var(--color-text-muted)" }}
+        <a href="/" className="mb-4 text-sm transition-colors flex items-center gap-1" style={{ color: "var(--color-text-muted)", textDecoration: "none" }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
           &larr; Back
-        </button>
+        </a>
 
         {/* Card glow */}
         <div className="absolute -inset-1 rounded-2xl opacity-15 blur-xl" style={{
