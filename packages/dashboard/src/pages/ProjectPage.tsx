@@ -50,6 +50,14 @@ export function ProjectPage() {
   const [loadError, setLoadError] = useState("");
   const [claudeConnected, setClaudeConnected] = useState<boolean | null>(null);
 
+  // Git state
+  const [gitStatus, setGitStatus] = useState<any>(null);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [gitLoading, setGitLoading] = useState("");
+  const [gitError, setGitError] = useState("");
+  const [gitSuccess, setGitSuccess] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
+
   // Load project details + check Claude connection
   useEffect(() => {
     if (!projectId) return;
@@ -80,11 +88,67 @@ export function ProjectPage() {
       broker.getProjectUsers(projectId!).then(setActiveUsers).catch(() => {});
       broker.getProjectLocks(projectId!).then(setLocks).catch(() => {});
       broker.getProjectActivity(projectId!, 20).then(setActivity).catch(() => {});
+      broker.getGitStatus(projectId!).then(setGitStatus).catch(() => {});
     }
     refresh();
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
   }, [projectId]);
+
+  function clearGitMessages() {
+    setGitError(""); setGitSuccess("");
+    setTimeout(() => { setGitError(""); setGitSuccess(""); }, 5000);
+  }
+
+  async function handleGitInit() {
+    if (!projectId) return;
+    setGitLoading("init");
+    setGitError("");
+    try {
+      await broker.gitInit(projectId, remoteUrl || undefined);
+      setGitSuccess("Git initialized!");
+      setRemoteUrl("");
+      broker.getGitStatus(projectId).then(setGitStatus).catch(() => {});
+      clearGitMessages();
+    } catch (err: any) { setGitError(err.message); } finally { setGitLoading(""); }
+  }
+
+  async function handleGitCommit() {
+    if (!projectId || !commitMsg) return;
+    setGitLoading("commit");
+    setGitError("");
+    try {
+      await broker.gitCommit(projectId, commitMsg);
+      setCommitMsg("");
+      setGitSuccess("Committed!");
+      broker.getGitStatus(projectId).then(setGitStatus).catch(() => {});
+      clearGitMessages();
+    } catch (err: any) { setGitError(err.message); } finally { setGitLoading(""); }
+  }
+
+  async function handleGitPush() {
+    if (!projectId) return;
+    setGitLoading("push");
+    setGitError("");
+    try {
+      await broker.gitPush(projectId);
+      setGitSuccess("Pushed!");
+      broker.getGitStatus(projectId).then(setGitStatus).catch(() => {});
+      clearGitMessages();
+    } catch (err: any) { setGitError(err.message); } finally { setGitLoading(""); }
+  }
+
+  async function handleGitPull() {
+    if (!projectId) return;
+    setGitLoading("pull");
+    setGitError("");
+    try {
+      await broker.gitPull(projectId);
+      setGitSuccess("Pulled!");
+      broker.getGitStatus(projectId).then(setGitStatus).catch(() => {});
+      clearGitMessages();
+    } catch (err: any) { setGitError(err.message); } finally { setGitLoading(""); }
+  }
 
   const handleSendMessage = useCallback(async (text: string) => {
     if (!sessionId) return;
@@ -216,6 +280,128 @@ export function ProjectPage() {
           <div className="p-4" style={{ borderBottom: "1px solid var(--color-border)" }}>
             <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>File Locks</h3>
             <FileLockIndicator locks={locks} />
+          </div>
+
+          {/* Git */}
+          <div className="p-4" style={{ borderBottom: "1px solid var(--color-border)" }}>
+            <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Git</h3>
+
+            {gitError && <p className="text-xs mb-2 px-2 py-1 rounded" style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>{gitError}</p>}
+            {gitSuccess && <p className="text-xs mb-2 px-2 py-1 rounded" style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>{gitSuccess}</p>}
+
+            {!gitStatus?.initialized ? (
+              <div className="space-y-2">
+                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Not a git repo yet</p>
+                <input
+                  type="text"
+                  value={remoteUrl}
+                  onChange={(e) => setRemoteUrl(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded text-xs focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                  placeholder="github.com/you/repo.git (optional)"
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                />
+                <button onClick={handleGitInit} disabled={gitLoading === "init"}
+                  className="w-full text-xs py-1.5 rounded-lg font-medium"
+                  style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                  {gitLoading === "init" ? "Initializing..." : "Initialize Git"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Branch + remote info */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--color-accent-muted)", color: "var(--color-accent)" }}>
+                    {gitStatus.branch}
+                  </span>
+                  {gitStatus.changes > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "var(--color-warning-muted)", color: "var(--color-warning)" }}>
+                      {gitStatus.changes} changed
+                    </span>
+                  )}
+                </div>
+
+                {/* Changed files */}
+                {gitStatus.changedFiles?.length > 0 && (
+                  <div className="max-h-20 overflow-y-auto space-y-0.5">
+                    {gitStatus.changedFiles.slice(0, 8).map((f: any, i: number) => (
+                      <div key={i} className="text-xs font-mono flex items-center gap-1.5">
+                        <span style={{ color: f.status === "M" ? "var(--color-warning)" : f.status === "?" ? "var(--color-success)" : "var(--color-error)" }}>
+                          {f.status === "?" ? "+" : f.status}
+                        </span>
+                        <span style={{ color: "var(--color-text-muted)" }}>{f.file.split("/").pop()}</span>
+                      </div>
+                    ))}
+                    {gitStatus.changedFiles.length > 8 && (
+                      <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>+{gitStatus.changedFiles.length - 8} more</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Commit */}
+                {gitStatus.changes > 0 && (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={commitMsg}
+                      onChange={(e) => setCommitMsg(e.target.value)}
+                      className="flex-1 px-2 py-1.5 rounded text-xs focus:outline-none"
+                      style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                      placeholder="Commit message..."
+                      onKeyDown={(e) => { if (e.key === "Enter") handleGitCommit(); }}
+                      onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                      onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                    />
+                    <button onClick={handleGitCommit} disabled={!commitMsg || gitLoading === "commit"}
+                      className="text-xs px-2.5 py-1.5 rounded-lg font-medium shrink-0"
+                      style={{
+                        background: !commitMsg ? "var(--color-bg-hover)" : "var(--color-primary)",
+                        color: !commitMsg ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                      }}>
+                      {gitLoading === "commit" ? "..." : "Commit"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Push / Pull */}
+                {gitStatus.remote && (
+                  <div className="flex gap-1.5">
+                    <button onClick={handleGitPull} disabled={!!gitLoading}
+                      className="flex-1 text-xs py-1.5 rounded-lg font-medium"
+                      style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}>
+                      {gitLoading === "pull" ? "Pulling..." : "Pull"}
+                    </button>
+                    <button onClick={handleGitPush} disabled={!!gitLoading}
+                      className="flex-1 text-xs py-1.5 rounded-lg font-medium"
+                      style={{ background: "var(--color-secondary)", color: "#fff" }}>
+                      {gitLoading === "push" ? "Pushing..." : "Push"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Set remote if not set */}
+                {!gitStatus.remote && (
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={remoteUrl}
+                      onChange={(e) => setRemoteUrl(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded text-xs focus:outline-none"
+                      style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                      placeholder="https://github.com/you/repo.git"
+                      onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                      onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                    />
+                    <button onClick={handleGitInit} disabled={!remoteUrl || gitLoading === "init"}
+                      className="w-full text-xs py-1.5 rounded-lg font-medium"
+                      style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                      Set Remote
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Activity */}

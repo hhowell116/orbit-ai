@@ -90,6 +90,17 @@ export function useBroker() {
     },
     getProjectLocks: (projectId: string) => brokerFetch(`/locks/${projectId}`),
 
+    // Git operations
+    getGitStatus: (projectId: string) => brokerFetch(`/projects/${projectId}/git/status`),
+    gitInit: (projectId: string, remoteUrl?: string) =>
+      brokerFetch(`/projects/${projectId}/git/init`, { method: "POST", body: JSON.stringify({ remote_url: remoteUrl }) }),
+    gitCommit: (projectId: string, message: string) =>
+      brokerFetch(`/projects/${projectId}/git/commit`, { method: "POST", body: JSON.stringify({ message }) }),
+    gitPush: (projectId: string) =>
+      brokerFetch(`/projects/${projectId}/git/push`, { method: "POST", body: JSON.stringify({}) }),
+    gitPull: (projectId: string) =>
+      brokerFetch(`/projects/${projectId}/git/pull`, { method: "POST", body: JSON.stringify({}) }),
+
     // Sessions
     getSessions: () => brokerFetch("/sessions"),
     createSession: (projectId: string, sessionId: string, title?: string) =>
