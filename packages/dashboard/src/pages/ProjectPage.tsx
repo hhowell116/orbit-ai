@@ -48,13 +48,17 @@ export function ProjectPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState<"idle" | "thinking" | "error">("idle");
   const [loadError, setLoadError] = useState("");
+  const [claudeConnected, setClaudeConnected] = useState<boolean | null>(null);
 
-  // Load project details
+  // Load project details + check Claude connection
   useEffect(() => {
     if (!projectId) return;
     broker.getProject(projectId).then(setProject).catch((err) => {
       setLoadError(err.message || "Failed to load project");
     });
+    broker.rawFetch("/connections/claude/status")
+      .then((data: any) => setClaudeConnected(data.connected))
+      .catch(() => setClaudeConnected(false));
   }, [projectId]);
 
   // Create or load session
@@ -183,7 +187,7 @@ export function ProjectPage() {
       <div className="flex-1 flex min-h-0">
         {/* Chat */}
         <div className="flex-[7] flex flex-col min-h-0" style={{ borderRight: "1px solid var(--color-border)" }}>
-          <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} />
+          <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} claudeConnected={claudeConnected} />
         </div>
 
         {/* Sidebar */}

@@ -317,11 +317,13 @@ api.post("/teams/join", authMiddleware, async (c) => {
 
 api.get("/teams/:id", authMiddleware, (c) => {
   const { id } = c.req.param();
-  const team = db.query("SELECT id, name, slug, owner_id, created_at, anthropic_api_key FROM teams WHERE id = ?").get(id) as any;
+  const team = db.query("SELECT id, name, slug, owner_id, created_at, anthropic_api_key, claude_auth_method, github_token FROM teams WHERE id = ?").get(id) as any;
   if (!team) return c.json({ error: "Team not found" }, 404);
-  // Don't expose the full key, just whether it's set
   team.has_api_key = !!team.anthropic_api_key;
+  team.claude_auth_method = team.claude_auth_method || "api_key";
+  team.has_github_token = !!team.github_token;
   delete team.anthropic_api_key;
+  delete team.github_token;
   return c.json(team);
 });
 
@@ -342,7 +344,9 @@ api.get("/teams/:id/members", authMiddleware, (c) => {
 api.patch("/teams/:id", authMiddleware, async (c) => {
   const user = c.get("user") as JWTPayload;
   const { id } = c.req.param();
-  const { name, anthropic_api_key } = await c.req.json<{ name?: string; anthropic_api_key?: string }>();
+  const { name, anthropic_api_key, claude_auth_method, github_token } = await c.req.json<{
+    name?: string; anthropic_api_key?: string; claude_auth_method?: string; github_token?: string;
+  }>();
 
   const membership = db
     .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
@@ -356,9 +360,21 @@ api.patch("/teams/:id", authMiddleware, async (c) => {
   if (anthropic_api_key !== undefined) {
     db.run("UPDATE teams SET anthropic_api_key = ? WHERE id = ?", [anthropic_api_key, id]);
   }
+  if (claude_auth_method !== undefined) {
+    db.run("UPDATE teams SET claude_auth_method = ? WHERE id = ?", [claude_auth_method, id]);
+  }
+  if (github_token !== undefined) {
+    db.run("UPDATE teams SET github_token = ? WHERE id = ?", [github_token, id]);
+  }
 
-  const team = db.query("SELECT * FROM teams WHERE id = ?").get(id);
-  return c.json(team);
+  // Return sanitized team
+  const updated = db.query("SELECT id, name, slug, owner_id, created_at, anthropic_api_key, claude_auth_method, github_token FROM teams WHERE id = ?").get(id) as any;
+  updated.has_api_key = !!updated.anthropic_api_key;
+  updated.claude_auth_method = updated.claude_auth_method || "api_key";
+  updated.has_github_token = !!updated.github_token;
+  delete updated.anthropic_api_key;
+  delete updated.github_token;
+  return c.json(updated);
 });
 
 api.delete("/teams/:id/members/:userId", authMiddleware, (c) => {
@@ -653,33 +669,31 @@ teamApi.get("/chat/:sessionId/messages", (c) => {
   return c.json(messages);
 });
 
-// Check OpenCode connection status for a project
+// Check Claude connection status
 teamApi.get("/connections/claude/status", async (c) => {
   const user = c.get("user") as JWTPayload;
-  // Check if any project's OpenCode instance is reachable
-  const projects = db.query("SELECT opencode_port FROM projects WHERE team_id = ? LIMIT 1").all(user.team_id) as { opencode_port: number }[];
-  if (projects.length === 0) return c.json({ connected: false, reason: "No projects" });
+  const team = db.query("SELECT anthropic_api_key, claude_auth_method FROM teams WHERE id = ?").get(user.team_id) as any;
+  if (!team) return c.json({ connected: false, reason: "Team not found" });
 
-  const port = projects[0].opencode_port;
-  const password = process.env.OPENCODE_SERVER_PASSWORD || "testpass123";
-  try {
-    const res = await fetch(`http://localhost:${port}/session`, {
-      headers: { "Authorization": "Basic " + btoa(`opencode:${password}`) },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (res.ok) {
-      return c.json({ connected: true, port });
-    }
-    return c.json({ connected: false, reason: `OpenCode responded with ${res.status}` });
-  } catch {
-    return c.json({ connected: false, reason: "OpenCode not running on port " + port });
+  const method = team.claude_auth_method || "api_key";
+
+  if (method === "api_key" && team.anthropic_api_key) {
+    return c.json({ connected: true, method: "api_key" });
   }
+  if (method === "credentials" && team.anthropic_api_key) {
+    return c.json({ connected: true, method: "credentials" });
+  }
+  return c.json({ connected: false, method, reason: "No Claude authentication configured" });
 });
 
 // Check GitHub connection status
 teamApi.get("/connections/github/status", (c) => {
-  // TODO: Check if team has GitHub OAuth token stored
-  return c.json({ connected: false, reason: "GitHub OAuth not configured yet" });
+  const user = c.get("user") as JWTPayload;
+  const team = db.query("SELECT github_token FROM teams WHERE id = ?").get(user.team_id) as any;
+  if (team?.github_token) {
+    return c.json({ connected: true });
+  }
+  return c.json({ connected: false, reason: "No GitHub token configured" });
 });
 
 teamApi.post("/chat/:sessionId", async (c) => {

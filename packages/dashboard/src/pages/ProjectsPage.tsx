@@ -265,6 +265,18 @@ export function ProjectsPage() {
             <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>{user?.display_name}</span>
           </div>
           <button
+            onClick={() => navigate(`/teams/${activeTeam?.id}/settings`)}
+            className="text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
+            style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}
+          >
+            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
+              <path d="M15 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm-7.978-1A.261.261 0 017.002 13c.001-.246.154-.986.832-1.664C8.484 10.68 9.484 10 11 10c1.516 0 2.516.68 3.166 1.336.678.678.83 1.418.832 1.664a.261.261 0 01-.018.02H7.022zM11 7a2 2 0 100-4 2 2 0 000 4zm3-2a3 3 0 11-6 0 3 3 0 016 0zM6.936 9.28a5.88 5.88 0 00-1.23-.247A7.35 7.35 0 005 9c-4 0-5 3-5 4 0 .667.333 1 1 1h4.216A2.238 2.238 0 015 13c0-.779.357-1.85 1.084-2.828.243-.327.517-.634.852-.916zM4.92 10A5.493 5.493 0 004 13H1c0-.26.164-1.03.76-1.724.545-.636 1.492-1.256 3.16-1.275zM1.5 5.5a3 3 0 116 0 3 3 0 01-6 0zm3-2a2 2 0 100 4 2 2 0 000-4z"/>
+            </svg>
+            Manage Team
+          </button>
+          <button
             onClick={() => navigate("/connections")}
             className="text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
             style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
@@ -298,6 +310,57 @@ export function ProjectsPage() {
       </header>
 
       <div className="flex relative" style={{ zIndex: 1 }}>
+        {/* Left sidebar — Activity feed */}
+        <aside
+          className="w-72 shrink-0 p-4 overflow-y-auto"
+          style={{ borderRight: "1px solid var(--color-border)", maxHeight: "calc(100vh - 57px)" }}
+        >
+          <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
+            Activity Feed
+          </h3>
+          {activity.length === 0 ? (
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No recent activity</p>
+          ) : (
+            <div className="space-y-3">
+              {activity.map((a) => (
+                <div key={a.id} className="flex gap-2">
+                  <span
+                    className="w-5 h-5 rounded flex items-center justify-center text-xs font-mono shrink-0 mt-0.5"
+                    style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
+                  >
+                    {eventIcons[a.event_type] || "?"}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs leading-relaxed">
+                      <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
+                      {" "}
+                      <span style={{ color: "var(--color-text-muted)" }}>
+                        {a.event_type.replace(".", " ").replace("file ", "").replace("session ", "")}
+                      </span>
+                      {a.file_path && (
+                        <>
+                          {" "}
+                          <span className="font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                            {a.file_path.split("/").pop()}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                        {a.project_name}
+                      </span>
+                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                        {timeAgo(a.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
+
         {/* Main content */}
         <main className="flex-1 p-6 max-w-5xl mx-auto">
           {/* Connection error */}
@@ -467,56 +530,6 @@ export function ProjectsPage() {
           )}
         </main>
 
-        {/* Right sidebar — Activity feed */}
-        <aside
-          className="w-72 shrink-0 p-4 overflow-y-auto"
-          style={{ borderLeft: "1px solid var(--color-border)", maxHeight: "calc(100vh - 57px)" }}
-        >
-          <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
-            Activity Feed
-          </h3>
-          {activity.length === 0 ? (
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No recent activity</p>
-          ) : (
-            <div className="space-y-3">
-              {activity.map((a) => (
-                <div key={a.id} className="flex gap-2">
-                  <span
-                    className="w-5 h-5 rounded flex items-center justify-center text-xs font-mono shrink-0 mt-0.5"
-                    style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
-                  >
-                    {eventIcons[a.event_type] || "?"}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-xs leading-relaxed">
-                      <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
-                      {" "}
-                      <span style={{ color: "var(--color-text-muted)" }}>
-                        {a.event_type.replace(".", " ").replace("file ", "").replace("session ", "")}
-                      </span>
-                      {a.file_path && (
-                        <>
-                          {" "}
-                          <span className="font-mono" style={{ color: "var(--color-text-secondary)" }}>
-                            {a.file_path.split("/").pop()}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                        {a.project_name}
-                      </span>
-                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                        {timeAgo(a.created_at)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
       </div>
     </div>
   );

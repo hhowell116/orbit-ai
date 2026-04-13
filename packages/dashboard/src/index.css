@@ -47,6 +47,10 @@
   scrollbar-color: var(--color-border) transparent;
 }
 
+button, a, [role="button"], select, label[for], summary, [onclick] {
+  cursor: pointer;
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
