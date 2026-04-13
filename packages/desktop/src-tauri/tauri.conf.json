@@ -27,11 +27,18 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/hhowell116/orbit-ai/releases/latest/download/latest.json"
+      ],
+      "dialog": true
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": "v2Compatible",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
