@@ -578,6 +578,44 @@ teamApi.post("/projects", async (c) => {
   return c.json(project, 201);
 });
 
+// Upload a zip file to an existing project
+teamApi.post("/projects/:id/upload", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+
+  const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id) as any;
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const formData = await c.req.formData();
+  const file = formData.get("file") as File | null;
+  if (!file) return c.json({ error: "No file uploaded" }, 400);
+
+  const { mkdirSync, existsSync, writeFileSync } = await import("fs");
+  if (!existsSync(project.path)) mkdirSync(project.path, { recursive: true });
+
+  if (file.name.endsWith(".zip")) {
+    // Save zip to temp, then extract
+    const zipPath = join(project.path, "__upload.zip");
+    const bytes = await file.arrayBuffer();
+    writeFileSync(zipPath, Buffer.from(bytes));
+
+    const proc = Bun.spawnSync(["unzip", "-o", zipPath, "-d", project.path]);
+    // Clean up zip file
+    const { unlinkSync } = await import("fs");
+    try { unlinkSync(zipPath); } catch {}
+
+    if (proc.exitCode !== 0) {
+      return c.json({ error: `Unzip failed: ${proc.stderr.toString().trim()}` }, 400);
+    }
+    return c.json({ ok: true, message: "Zip extracted successfully" });
+  } else {
+    // Single file upload — save directly
+    const bytes = await file.arrayBuffer();
+    writeFileSync(join(project.path, file.name), Buffer.from(bytes));
+    return c.json({ ok: true, message: `File ${file.name} uploaded` });
+  }
+});
+
 teamApi.get("/projects/:id", (c) => {
   const user = c.get("user") as JWTPayload;
   const { id } = c.req.param();
