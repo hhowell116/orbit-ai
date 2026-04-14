@@ -277,6 +277,42 @@ The tunnel stays running permanently. On deploys, only the broker restarts — z
 
 ---
 
+## Automatic File Locking
+
+When a user opens a project terminal, the broker starts a filesystem watcher (`fs.watch` with `recursive: true`) on the project directory. Any file change automatically locks that file for the active user.
+
+### How it works
+
+```
+User opens project terminal
+  → Broker starts fs.watch on project directory
+  → Claude Code edits a file
+  → fs.watch detects the change
+  → Broker auto-locks the file for that user (INSERT OR REPLACE into file_locks)
+  → Broadcasts "lock.acquired" to all connected clients
+  → Other users see the lock in the File Locks sidebar panel
+```
+
+### Lock lifecycle
+
+1. **Acquired automatically** — when a file changes in a watched project directory
+2. **Visible in real-time** — sidebar shows "file.ts locked by Hayden" with color coding (green = yours, orange = someone else's)
+3. **Conflict prevention** — if another user's terminal changes a file already locked by someone else, the lock is NOT overridden
+4. **Released on disconnect** — when all of a user's browser tabs disconnect, all their locks are released and broadcast
+
+### Ignored files
+
+The watcher ignores: `node_modules/`, `.git/`, `.DS_Store`, `__pycache__/`, `.pyc`, `.swp`, `.lock`, `package-lock.json`, `bun.lockb`, `.env`
+
+### Implementation
+
+- `packages/broker/src/filewatcher.ts` — filesystem watcher module
+- One watcher per user per project (keyed by `userId:projectId`)
+- Started in WebSocket `open` handler, stopped in `close` handler
+- Uses the existing `broadcast()` SSE system for real-time updates
+
+---
+
 ## Security
 
 ### Token Encryption

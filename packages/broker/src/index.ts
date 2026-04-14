@@ -1294,6 +1294,10 @@ app.get("*", serveStatic({ root: DASHBOARD_DIR, path: "index.html" }));
 const PORT = Number(process.env.BROKER_PORT || "5000");
 
 import { createSession, getSession, destroySession, resizeSession, getSessionBuffer } from "./terminal";
+import { startWatching, stopWatching, setFilewatcherBroadcast } from "./filewatcher";
+
+// Give the filewatcher access to the broadcast function
+setFilewatcherBroadcast(broadcast);
 
 const wsClients = new Map<string, Set<any>>(); // sessionKey → Set of WebSocket clients
 
@@ -1381,6 +1385,12 @@ export default {
           "SELECT a.*, u.display_name as user_display_name, p.name as project_name FROM activity a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN projects p ON p.id = a.project_id WHERE a.id = last_insert_rowid()"
         ).get();
         if (activityEntry) broadcast("activity", activityEntry);
+
+        // Start file watcher for auto-locking
+        const projectData = db.query("SELECT path FROM projects WHERE id = ?").get(projectId) as { path: string } | null;
+        if (projectData?.path) {
+          startWatching(projectId, projectData.path, userId, dbSessionId);
+        }
       }
 
       // Wire PTY output to WebSocket clients (once per session, not per client)
@@ -1434,8 +1444,11 @@ export default {
             db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
             broadcast("session.ended", { id: dbSessionId });
 
-            // Log to activity feed
+            // Stop file watcher and release all locks
             if (projectId) {
+              stopWatching(userId, projectId);
+
+              // Log to activity feed
               db.run(
                 "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
                 [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
