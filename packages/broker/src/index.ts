@@ -378,6 +378,10 @@ api.put("/teams/:id/rules", authMiddleware, async (c) => {
   }
 
   db.run("UPDATE teams SET rules = ? WHERE id = ?", [rules, id]);
+
+  // Sync CLAUDE.md files for all projects in this team
+  import("./rules-sync").then(({ syncTeamRules }) => syncTeamRules(id));
+
   return c.json({ ok: true });
 });
 
@@ -840,6 +844,10 @@ teamApi.put("/projects/:id/rules", async (c) => {
   if (!project) return c.json({ error: "Project not found" }, 404);
 
   db.run("UPDATE projects SET rules = ? WHERE id = ?", [rules, id]);
+
+  // Sync CLAUDE.md for this project
+  import("./rules-sync").then(({ syncProjectRules }) => syncProjectRules(id));
+
   return c.json({ ok: true });
 });
 
@@ -1425,6 +1433,9 @@ export default {
           ).get();
           if (activityEntry) broadcast("activity", activityEntry);
         }
+
+        // Sync CLAUDE.md with latest rules before terminal starts
+        import("./rules-sync").then(({ syncProjectRules }) => syncProjectRules(projectId));
 
         // Start file watcher for auto-locking
         const projectData = db.query("SELECT path FROM projects WHERE id = ?").get(projectId) as { path: string } | null;
