@@ -308,8 +308,25 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
             <div className="space-y-2">
               {launchOptions.map((opt) => (
                 <button key={opt.label} onClick={() => {
-                  sendCommand(opt.cmd);
-                  if (opt.postCmd) setTimeout(() => sendCommand(opt.postCmd!), 2000);
+                  // Clear terminal before launching to prevent overlap
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: "input", data: "clear\r" }));
+                  }
+                  setTimeout(() => {
+                    sendCommand(opt.cmd);
+                    // Force resize after Claude starts to fix TUI rendering
+                    setTimeout(() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN && fitAddonRef.current && termInstance.current) {
+                        fitAddonRef.current.fit();
+                        wsRef.current.send(JSON.stringify({
+                          type: "resize",
+                          cols: termInstance.current.cols,
+                          rows: termInstance.current.rows,
+                        }));
+                      }
+                    }, 1500);
+                    if (opt.postCmd) setTimeout(() => sendCommand(opt.postCmd!), 3000);
+                  }, 300);
                   setShowLaunchPicker(false);
                 }}
                   className="w-full text-left p-4 rounded-lg transition-all"
