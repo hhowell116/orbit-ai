@@ -27,6 +27,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
+      bracketedPasteMode: false, // Disable bracket paste so tokens paste cleanly in password prompts
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
       theme: {
         background: "#0d1117",
@@ -234,11 +235,11 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
 
   const claudeCommands = [
     { label: "claude", cmd: "claude", desc: "Start Claude Code", color: "var(--color-primary)" },
+    { label: "Swap Model", cmd: "/model", desc: "Switch Claude model", color: "var(--color-secondary)" },
     { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions", desc: "Start with auto-approve", color: "var(--color-warning)" },
     { label: "/login", cmd: "/login", desc: "Log in to Claude", color: "var(--color-success)" },
     { label: "/plan", cmd: "/plan", desc: "Enter plan mode", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", desc: "Compact context", color: "var(--color-secondary)" },
-    { label: "/model", cmd: "/model", desc: "Switch model", color: "var(--color-text-secondary)" },
     { label: "/clear", cmd: "/clear", desc: "Clear conversation", color: "var(--color-text-secondary)" },
     { label: "/cost", cmd: "/cost", desc: "Show token usage", color: "var(--color-text-secondary)" },
     { label: "/help", cmd: "/help", desc: "Show help", color: "var(--color-text-muted)" },
@@ -283,18 +284,37 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
               {c.label}
             </button>
           ))}
-          {/* Paste + Upload buttons */}
+          {/* Paste + Token Paste + Upload buttons */}
+          <span style={{ width: "1px", height: "16px", background: "var(--color-border)", margin: "0 2px" }} />
           <button onClick={async () => {
             try {
               const text = await navigator.clipboard.readText();
-              if (text) sendCommand(text.trimEnd());
+              if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: "input", data: text }));
+              }
             } catch {}
-          }} title="Paste from clipboard"
+          }} title="Paste text from clipboard"
             className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
             style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
             Paste
+          </button>
+          <button onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+                // Send raw text + Enter — designed for password/token prompts
+                const cleaned = text.trim();
+                wsRef.current.send(JSON.stringify({ type: "input", data: cleaned + "\r" }));
+              }
+            } catch {}
+          }} title="Paste token/password and press Enter (for login prompts)"
+            className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+            style={{ background: "var(--color-bg-elevated)", color: "var(--color-success)", border: "1px solid var(--color-border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-success)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+            Paste Token
           </button>
           <label title="Upload image to project" className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
             style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
