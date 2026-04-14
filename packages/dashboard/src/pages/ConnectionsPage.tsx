@@ -116,8 +116,8 @@ export function ConnectionsPage() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto p-6 relative" style={{ zIndex: 1 }}>
-        <div className="space-y-4">
+      <main className="max-w-5xl mx-auto p-6 relative" style={{ zIndex: 1 }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
 
           {/* Claude AI Connection */}
           <div className="rounded-xl overflow-hidden"
