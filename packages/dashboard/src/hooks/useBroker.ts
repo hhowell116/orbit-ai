@@ -169,6 +169,9 @@ export function useBroker() {
     deleteConnection: (provider: string) =>
       brokerFetch(`/connections/${provider}`, { method: "DELETE" }),
 
+    // Online users
+    getOnlineUsers: () => brokerFetch("/online-users"),
+
     // Activity
     getRecentActivity: (limit = 50) => brokerFetch(`/activity/recent?limit=${limit}`),
 

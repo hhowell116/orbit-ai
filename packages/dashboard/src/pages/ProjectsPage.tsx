@@ -35,6 +35,7 @@ export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showNewProject, setShowNewProject] = useState(false);
@@ -53,6 +54,7 @@ export function ProjectsPage() {
       broker.getProjects().then(setProjects),
       broker.getRecentActivity(30).then(setActivity),
       broker.getSessions().then(setSessions),
+      broker.getOnlineUsers().then(setOnlineUsers),
     ])
       .catch((err) => {
         setError(err.message || "Failed to connect to server");
@@ -63,6 +65,7 @@ export function ProjectsPage() {
       broker.getProjects().then(setProjects).catch(() => {});
       broker.getRecentActivity(30).then(setActivity).catch(() => {});
       broker.getSessions().then(setSessions).catch(() => {});
+      broker.getOnlineUsers().then(setOnlineUsers).catch(() => {});
     }, 8000);
     return () => clearInterval(interval);
   }, []);
@@ -452,7 +455,7 @@ export function ProjectsPage() {
           <div className="grid grid-cols-4 gap-3 mb-4">
             {[
               { key: "projects", label: "Projects", value: projects.length, color: "var(--color-primary)" },
-              { key: "users", label: "Active Users", value: totalActiveUsers, color: "var(--color-success)" },
+              { key: "users", label: "Active Users", value: Math.max(1, onlineUsers.length), color: "var(--color-success)" },
               { key: "sessions", label: "Sessions", value: activeSessions.length, color: "var(--color-secondary)" },
               { key: "thinking", label: "AI Thinking", value: thinkingSessions.length, color: "var(--color-accent)" },
             ].map((stat) => (
@@ -504,24 +507,33 @@ export function ProjectsPage() {
               )}
               {expandedStat === "users" && (
                 <div>
-                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Active Users</h3>
+                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Online Now</h3>
                   <div className="space-y-1.5">
-                    {/* Always show yourself */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
-                      <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
-                      <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{user?.display_name}</span>
-                      <span className="text-xs ml-auto px-1.5 py-0.5 rounded" style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>you</span>
-                    </div>
-                    {/* Other users with active sessions */}
-                    {activeSessions.filter((s) => s.user_display_name !== user?.display_name).map((s) => (
-                      <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                    {onlineUsers.map((u) => (
+                      <div key={u.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
                         <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
-                        <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
-                        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
-                        <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
-                        <span className="text-xs font-mono ml-auto" style={{ color: "var(--color-text-muted)" }}>{s.status}</span>
+                        <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{u.display_name}</span>
+                        {u.id === user?.id && (
+                          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>you</span>
+                        )}
+                        {u.session ? (
+                          <>
+                            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
+                            <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{u.session.project_name}</span>
+                            <span className="text-xs font-mono ml-auto" style={{ color: u.session.status === "thinking" ? "var(--color-secondary)" : "var(--color-text-muted)" }}>{u.session.status}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs ml-auto" style={{ color: "var(--color-text-muted)" }}>on dashboard</span>
+                        )}
                       </div>
                     ))}
+                    {onlineUsers.length === 0 && (
+                      <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                        <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{user?.display_name}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>you</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
