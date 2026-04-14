@@ -1294,34 +1294,49 @@ app.get("*", serveStatic({ root: DASHBOARD_DIR, path: "index.html" }));
 const PORT = Number(process.env.BROKER_PORT || "5000");
 
 import { createSession, getSession, destroySession, resizeSession, getSessionBuffer } from "./terminal";
-import { jwtVerify, importJWK } from "jose";
 
-// JWT verification for WebSocket auth
-async function verifyWsToken(token: string): Promise<any> {
-  try {
-    const secret = new TextEncoder().encode(process.env.BROKER_JWT_SECRET || "dev-secret-change-in-production");
-    const { payload } = await jwtVerify(token, secret);
-    return payload;
-  } catch {
-    return null;
-  }
+const wsClients = new Map<string, Set<any>>(); // sessionKey → Set of WebSocket clients
+
+// Wire PTY output to all WebSocket clients for a session (called once per session)
+const wiredSessions = new Set<string>();
+function wireSessionOutput(sessionKey: string, session: any) {
+  if (wiredSessions.has(sessionKey)) return; // Already wired
+  wiredSessions.add(sessionKey);
+  session.pty.onData((data: string) => {
+    const clients = wsClients.get(sessionKey);
+    if (clients) {
+      for (const client of clients) {
+        try { client.send(JSON.stringify({ type: "output", data })); } catch {}
+      }
+    }
+  });
 }
-
-const wsClients = new Map<string, Set<any>>(); // sessionKey -> Set of WebSocket clients
 
 export default {
   port: PORT,
-  fetch(req: Request, server: any) {
+  async fetch(req: Request, server: any) {
     const url = new URL(req.url);
 
-    // WebSocket upgrade for terminal
+    // WebSocket upgrade for terminal — verify JWT BEFORE upgrading
     if (url.pathname === "/ws/terminal") {
       const token = url.searchParams.get("token");
       const projectId = url.searchParams.get("project") || null;
-      if (!token) {
-        return new Response("Missing token", { status: 401 });
+      if (!token) return new Response("Missing token", { status: 401 });
+
+      // Verify JWT synchronously before upgrade
+      let user: any;
+      try {
+        const secret = new TextEncoder().encode(process.env.BROKER_JWT_SECRET || "dev-secret-change-in-production");
+        const { jwtVerify } = await import("jose");
+        const { payload } = await jwtVerify(token, secret);
+        user = payload;
+      } catch {
+        return new Response("Invalid token", { status: 401 });
       }
-      const upgraded = server.upgrade(req, { data: { token, projectId } });
+
+      const upgraded = server.upgrade(req, {
+        data: { userId: user.sub, username: user.username, projectId }
+      });
       if (upgraded) return undefined;
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
@@ -1330,72 +1345,50 @@ export default {
     return app.fetch(req, server);
   },
   websocket: {
-    async open(ws: any) {
-      const { token, projectId } = ws.data;
-
-      // Verify JWT
-      const user = await verifyWsToken(token);
-      if (!user) {
-        ws.send(JSON.stringify({ type: "error", message: "Authentication failed" }));
-        ws.close();
-        return;
-      }
-
-      ws.data.userId = user.sub;
-      ws.data.username = user.username;
-      const sessionKey = projectId ? `${user.sub}:${projectId}` : user.sub;
+    open(ws: any) {
+      const { userId, username, projectId } = ws.data;
+      const sessionKey = projectId ? `${userId}:${projectId}` : userId;
 
       // Create or get terminal session
-      const session = createSession(user.sub, projectId);
+      const session = createSession(userId, projectId);
       if (!session) {
-        ws.send(JSON.stringify({ type: "error", message: "Failed to create terminal session" }));
+        ws.send(JSON.stringify({ type: "error", message: "Failed to create terminal session. Check server logs." }));
         ws.close();
         return;
       }
 
-      // Track this WebSocket client
+      // Track this client
       if (!wsClients.has(sessionKey)) wsClients.set(sessionKey, new Set());
       wsClients.get(sessionKey)!.add(ws);
 
+      // Wire PTY output to WebSocket clients (once per session, not per client)
+      wireSessionOutput(sessionKey, session);
+
       // Send buffered output for reconnection
-      const buffer = getSessionBuffer(user.sub, projectId || undefined);
+      const buffer = getSessionBuffer(userId, projectId || undefined);
       if (buffer.length > 0) {
         ws.send(JSON.stringify({ type: "output", data: buffer.join("") }));
       }
 
-      // Stream PTY output to this WebSocket client
-      session.pty.onData((data: string) => {
-        const clients = wsClients.get(sessionKey);
-        if (clients) {
-          for (const client of clients) {
-            try { client.send(JSON.stringify({ type: "output", data })); } catch {}
-          }
-        }
-      });
-
-      ws.send(JSON.stringify({ type: "connected", userId: user.sub }));
-      console.log(`[ws] Terminal connected: ${user.username} (${sessionKey})`);
+      ws.send(JSON.stringify({ type: "connected", userId }));
+      console.log(`[ws] Terminal connected: ${username} (${sessionKey})`);
     },
 
     message(ws: any, message: string | Buffer) {
       try {
         const msg = JSON.parse(typeof message === "string" ? message : message.toString());
-        const userId = ws.data.userId;
-        const projectId = ws.data.projectId;
+        const { userId, projectId } = ws.data;
 
         switch (msg.type) {
           case "input":
-            // Send input to PTY
             const session = getSession(userId, projectId || undefined);
             if (session) {
               session.pty.write(msg.data);
             }
             break;
-
           case "resize":
             resizeSession(userId, msg.cols, msg.rows, projectId || undefined);
             break;
-
           case "ping":
             ws.send(JSON.stringify({ type: "pong" }));
             break;
@@ -1406,16 +1399,13 @@ export default {
     },
 
     close(ws: any) {
-      const userId = ws.data.userId;
-      const projectId = ws.data.projectId;
+      const { userId, projectId } = ws.data;
       if (!userId) return;
-
       const sessionKey = projectId ? `${userId}:${projectId}` : userId;
       const clients = wsClients.get(sessionKey);
       if (clients) {
         clients.delete(ws);
         if (clients.size === 0) {
-          // No more clients — session stays alive for reconnection
           console.log(`[ws] All clients disconnected from ${sessionKey} — session persists`);
         }
       }
