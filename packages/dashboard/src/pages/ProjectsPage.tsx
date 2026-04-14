@@ -392,59 +392,49 @@ export function ProjectsPage() {
       </header>
 
       <div className="flex relative" style={{ zIndex: 1 }}>
-        {/* Left sidebar — Activity feed */}
-        <aside
-          className="w-72 shrink-0 p-4 overflow-y-auto"
-          style={{ borderRight: "1px solid var(--color-border)", maxHeight: "calc(100vh - 57px)" }}
-        >
-          <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
-            Activity Feed
-          </h3>
-          {activity.length === 0 ? (
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No recent activity</p>
-          ) : (
-            <div className="space-y-3">
-              {activity.map((a) => (
-                <div key={a.id} className="flex gap-2">
-                  <span
-                    className="w-5 h-5 rounded flex items-center justify-center text-xs font-mono shrink-0 mt-0.5"
-                    style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}
-                  >
-                    {eventIcons[a.event_type] || "?"}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-xs leading-relaxed">
-                      <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
-                      {" "}
-                      <span style={{ color: "var(--color-text-muted)" }}>
-                        {a.event_type.replace(".", " ").replace("file ", "").replace("session ", "")}
-                      </span>
-                      {a.file_path && (
-                        <>
-                          {" "}
-                          <span className="font-mono" style={{ color: "var(--color-text-secondary)" }}>
-                            {a.file_path.split("/").pop()}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                        {a.project_name}
-                      </span>
-                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                        {timeAgo(a.created_at)}
-                      </span>
-                    </div>
-                  </div>
+        {/* Left sidebar — Navigation */}
+        <aside className="w-60 shrink-0 p-4 overflow-y-auto"
+          style={{ borderRight: "1px solid var(--color-border)", maxHeight: "calc(100vh - 57px)" }}>
+
+          <button onClick={() => setShowNewProject(true)}
+            className="w-full py-2.5 px-4 rounded-lg text-sm font-medium mb-5 transition-all"
+            style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-primary-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-primary)")}>
+            + New Project
+          </button>
+
+          <div className="space-y-1">
+            {[
+              { label: "Manage Team", desc: "Members, roles & rules", icon: "M15 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm-7.978-1A.261.261 0 017.002 13c.001-.246.154-.986.832-1.664C8.484 10.68 9.484 10 11 10c1.516 0 2.516.68 3.166 1.336.678.678.83 1.418.832 1.664a.261.261 0 01-.018.02H7.022zM11 7a2 2 0 100-4 2 2 0 000 4zm3-2a3 3 0 11-6 0 3 3 0 016 0z", action: () => navigate(`/teams/${activeTeam?.id}/settings`) },
+              { label: "Connections", desc: "Claude & GitHub tokens", icon: "M1.5 3A1.5 1.5 0 000 4.5v1A1.5 1.5 0 001.5 7h1A1.5 1.5 0 004 5.5v-1A1.5 1.5 0 002.5 3h-1zM5 4.5a.5.5 0 01.5-.5h9a.5.5 0 010 1h-9a.5.5 0 01-.5-.5zM5.5 10a.5.5 0 000 1h9a.5.5 0 000-1h-9z", action: () => navigate("/connections") },
+              { label: "Switch Team", desc: "", icon: "M8 8a3 3 0 100-6 3 3 0 000 6zM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 00-11.215 0c-.22.578.254 1.139.872 1.139h9.47z", action: () => navigate("/teams") },
+            ].map((item) => (
+              <button key={item.label} onClick={item.action}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+                style={{ color: "var(--color-text-secondary)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-hover)"; e.currentTarget.style.color = "var(--color-text-primary)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0" fill="currentColor"><path d={item.icon} /></svg>
+                <div>
+                  <div className="text-sm">{item.label}</div>
+                  {item.desc && <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>{item.desc}</div>}
                 </div>
-              ))}
-            </div>
-          )}
+              </button>
+            ))}
+          </div>
+
+          {/* Team name */}
+          <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--color-border)" }}>
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--color-text-muted)" }}>Team</div>
+            <div className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name || "—"}</div>
+          </div>
         </aside>
 
-        {/* Main content */}
-        <main className="flex-1 p-6">
+        {/* Main content — centered */}
+        <main className="flex-1 p-6" style={{ textAlign: "center" }}>
+          <div style={{ maxWidth: "900px", margin: "0 auto", textAlign: "left" }}>
+
           {/* Connection error */}
           {error && (
             <div
@@ -454,56 +444,6 @@ export function ProjectsPage() {
               {error} — Make sure the broker server is running.
             </div>
           )}
-
-          {/* Team & Quick Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            {/* Team info */}
-            <div className="rounded-xl p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-              <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>Team</div>
-              <div className="text-lg font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name || "—"}</div>
-              <div className="flex gap-2 mt-3">
-                <button onClick={() => navigate(`/teams/${activeTeam?.id}/settings`)}
-                  className="text-xs px-3 py-1.5 rounded-lg transition-colors"
-                  style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
-                  Members & Rules
-                </button>
-                <button onClick={() => navigate("/connections")}
-                  className="text-xs px-3 py-1.5 rounded-lg transition-colors"
-                  style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
-                  Connections
-                </button>
-              </div>
-            </div>
-
-            {/* Quick setup checklist */}
-            <div className="rounded-xl p-5 md:col-span-2" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-              <div className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Getting Started</div>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: "Set up Claude", desc: "Connect your Claude subscription", action: () => navigate("/connections"), icon: "ph-plug" },
-                  { label: "Set team rules", desc: "Define coding standards for Claude", action: () => navigate(`/teams/${activeTeam?.id}/settings`), icon: "ph-note-pencil" },
-                  { label: "Create a project", desc: "Clone a repo or start fresh", action: () => setShowNewProject(true), icon: "ph-folder-plus" },
-                  { label: "Connect GitHub", desc: "Push code with your token", action: () => navigate("/connections"), icon: "ph-github-logo" },
-                ].map((item) => (
-                  <button key={item.label} onClick={item.action}
-                    className="flex items-start gap-3 p-3 rounded-lg text-left transition-colors"
-                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; }}>
-                    <i className={`ph ${item.icon}`} style={{ fontSize: "16px", color: "var(--color-primary)", marginTop: "2px" }} />
-                    <div>
-                      <div className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{item.label}</div>
-                      <div className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{item.desc}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
 
           {/* Stats bar */}
           <div className="grid grid-cols-4 gap-3 mb-6">
@@ -565,20 +505,9 @@ export function ProjectsPage() {
             <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
               Projects
             </h2>
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
-                {projects.length} total
-              </span>
-              <button
-                onClick={() => setShowNewProject(true)}
-                className="text-xs px-3 py-1.5 rounded-lg transition-all font-medium"
-                style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-primary-hover)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-primary)")}
-              >
-                + New Project
-              </button>
-            </div>
+            <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
+              {projects.length} total
+            </span>
           </div>
 
           {loading ? (
@@ -660,7 +589,52 @@ export function ProjectsPage() {
               ))}
             </div>
           )}
+
+          </div>
         </main>
+
+        {/* Right sidebar — Activity feed */}
+        <aside className="w-60 shrink-0 p-4 overflow-y-auto"
+          style={{ borderLeft: "1px solid var(--color-border)", maxHeight: "calc(100vh - 57px)" }}>
+          <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
+            Activity Feed
+          </h3>
+          {activity.length === 0 ? (
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No recent activity</p>
+          ) : (
+            <div className="space-y-3">
+              {activity.map((a) => (
+                <div key={a.id} className="flex gap-2">
+                  <span className="w-5 h-5 rounded flex items-center justify-center text-xs font-mono shrink-0 mt-0.5"
+                    style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}>
+                    {eventIcons[a.event_type] || "?"}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs leading-relaxed">
+                      <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
+                      {" "}
+                      <span style={{ color: "var(--color-text-muted)" }}>
+                        {a.event_type.replace(".", " ").replace("file ", "").replace("session ", "")}
+                      </span>
+                      {a.file_path && (
+                        <>
+                          {" "}
+                          <span className="font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                            {a.file_path.split("/").pop()}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{a.project_name}</span>
+                      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{timeAgo(a.created_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
 
       </div>
     </div>
