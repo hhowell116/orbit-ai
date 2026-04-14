@@ -122,7 +122,7 @@ export function TeamSettingsPage() {
   return (
     <div className="min-h-screen relative" style={{ background: "var(--color-bg-base)" }}>
       <OrbitalBackground />
-      <div className="max-w-2xl mx-auto pt-10 px-4 pb-20 relative" style={{ zIndex: 1 }}>
+      <div className={`mx-auto pt-10 px-4 pb-20 relative ${tab === "rules" ? "max-w-5xl" : "max-w-2xl"}`} style={{ zIndex: 1 }}>
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <button onClick={() => navigate("/")} className="text-sm" style={{ color: "var(--color-text-muted)" }}
@@ -270,7 +270,8 @@ export function TeamSettingsPage() {
           </div>
         ) : (
           /* ═══ RULES TAB ═══ */
-          <div className="space-y-6">
+          <div className="space-y-4">
+            {/* Main rules editor */}
             <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -281,16 +282,24 @@ export function TeamSettingsPage() {
                     Instructions Claude must follow for all projects. Sent as a system prompt with prompt caching.
                   </p>
                 </div>
-                {rulesMsg && (
-                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {rulesMsg && (
+                    <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
+                  )}
+                  {isOwnerOrAdmin && (
+                    <button onClick={handleSaveRules} disabled={rulesSaving}
+                      className="text-xs px-4 py-2 rounded-lg font-medium"
+                      style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                      {rulesSaving ? "Saving..." : "Save Rules"}
+                    </button>
+                  )}
+                </div>
               </div>
               <textarea
                 value={teamRules}
                 onChange={(e) => setTeamRules(e.target.value)}
-                rows={20}
                 className="w-full px-3 py-2 rounded-lg text-sm font-mono focus:outline-none resize-y"
-                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.5", minHeight: "400px" }}
+                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.6", height: "calc(75vh - 200px)", minHeight: "300px" }}
                 onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
                 onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
                 placeholder={`# Team Rules for Claude
@@ -311,16 +320,38 @@ export function TeamSettingsPage() {
 - Always explain what you changed and why in 1-2 sentences.`}
                 disabled={!isOwnerOrAdmin}
               />
-              {isOwnerOrAdmin && (
-                <div className="flex justify-end mt-3">
-                  <button onClick={handleSaveRules} disabled={rulesSaving}
-                    className="text-xs px-4 py-2 rounded-lg font-medium"
-                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
-                    {rulesSaving ? "Saving..." : "Save Rules"}
-                  </button>
-                </div>
-              )}
             </div>
+
+            {/* Quick add rule templates */}
+            {isOwnerOrAdmin && (
+              <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>
+                  Add a Rule
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: "Token Efficiency", rule: "\n## Token Efficiency\n- Be concise. Avoid unnecessary explanations.\n- Only read files directly relevant to the task.\n- Do not repeat back large blocks of code.\n- Summarize changes rather than showing full diffs.\n" },
+                    { label: "Code Standards", rule: "\n## Code Standards\n- Follow existing code style and conventions.\n- Do not add comments unless the logic is non-obvious.\n- Do not refactor code unrelated to the current task.\n- Match the indentation and naming patterns in the file.\n" },
+                    { label: "Behavior", rule: "\n## Behavior\n- Ask clarifying questions before making large changes.\n- Always explain what you changed and why in 1-2 sentences.\n- Do not make assumptions about user intent.\n" },
+                    { label: "Security", rule: "\n## Security\n- Never expose API keys, tokens, or secrets in code.\n- Sanitize all user input before use.\n- Use parameterized queries for database access.\n- Follow OWASP top 10 guidelines.\n" },
+                    { label: "Testing", rule: "\n## Testing\n- Write tests for new features and bug fixes.\n- Do not remove or skip existing tests.\n- Test edge cases and error paths.\n" },
+                    { label: "Git", rule: "\n## Git\n- Write clear, concise commit messages.\n- One logical change per commit.\n- Do not commit generated files or dependencies.\n" },
+                  ].map((t) => (
+                    <button key={t.label} onClick={() => setTeamRules((prev) => prev + t.rule)}
+                      className="flex items-center gap-2 p-2.5 rounded-lg text-left text-xs transition-colors"
+                      style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                      <span style={{ color: "var(--color-primary)" }}>+</span>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs mt-3" style={{ color: "var(--color-text-muted)" }}>
+                  Click to append a rule template. Edit the text above, then save.
+                </p>
+              </div>
+            )}
 
             <p className="text-xs text-center" style={{ color: "var(--color-text-muted)" }}>
               These rules apply to all projects in this team. Individual projects can add their own rules in the project sidebar.
