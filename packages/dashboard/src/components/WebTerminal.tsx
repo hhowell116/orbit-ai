@@ -403,15 +403,15 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
             termInstance.current?.focus();
           }} title="Paste text from clipboard"
             className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
-            style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+            style={{ background: "var(--color-secondary-muted)", color: "var(--color-secondary)", border: "1px solid var(--color-secondary-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-secondary)"; e.currentTarget.style.background = "var(--color-secondary-muted)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-secondary-muted)"; e.currentTarget.style.background = "var(--color-secondary-muted)"; }}>
             Paste
           </button>
           <label title="Upload image to project" className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
-            style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+            style={{ background: "var(--color-accent-muted)", color: "var(--color-accent)", border: "1px solid var(--color-accent-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-accent)"; e.currentTarget.style.background = "var(--color-accent-muted)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-accent-muted)"; e.currentTarget.style.background = "var(--color-accent-muted)"; }}>
             Upload Image
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); e.target.value = ""; }} />
