@@ -1188,6 +1188,39 @@ teamApi.delete("/locks/session/:sessionId", (c) => {
 });
 
 // -- Activity (scoped to team) --
+// Online users — anyone with last_seen within the last 2 minutes
+teamApi.get("/online-users", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const users = db.query(`
+    SELECT u.id, u.username, u.display_name, u.last_seen
+    FROM users u
+    JOIN team_members tm ON tm.user_id = u.id
+    WHERE tm.team_id = ?
+      AND u.last_seen > datetime('now', '-2 minutes')
+    ORDER BY u.display_name
+  `).all(user.team_id);
+
+  // Also get active sessions to show which project they're in
+  const sessions = db.query(`
+    SELECT s.user_id, s.status, p.name as project_name
+    FROM sessions s
+    JOIN projects p ON p.id = s.project_id
+    WHERE p.team_id = ? AND s.status != 'ended'
+  `).all(user.team_id);
+
+  const sessionMap = new Map<string, { status: string; project_name: string }>();
+  for (const s of sessions as any[]) {
+    sessionMap.set(s.user_id, { status: s.status, project_name: s.project_name });
+  }
+
+  const result = (users as any[]).map((u) => ({
+    ...u,
+    session: sessionMap.get(u.id) || null,
+  }));
+
+  return c.json(result);
+});
+
 teamApi.get("/activity/recent", (c) => {
   const user = c.get("user") as JWTPayload;
   const limit = Number(c.req.query("limit") || "50");
