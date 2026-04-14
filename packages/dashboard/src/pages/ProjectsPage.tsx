@@ -677,7 +677,15 @@ export function ProjectsPage() {
                     <div className="text-xs leading-relaxed">
                       <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
                       {" "}
-                      <span style={{ color: "var(--color-text-muted)" }}>
+                      <span style={{ color: ({
+                          "session.created": "var(--color-success)",
+                          "session.ended": "var(--color-error)",
+                          "file.edited": "var(--color-primary)",
+                          "file.lock.acquired": "var(--color-warning)",
+                          "file.lock.released": "var(--color-text-muted)",
+                          "bash.ran": "var(--color-secondary)",
+                          "session.compacted": "var(--color-accent)",
+                        } as Record<string, string>)[a.event_type] || "var(--color-text-muted)" }}>
                         {({
                           "session.created": "joined",
                           "session.ended": "left",
@@ -696,6 +704,13 @@ export function ProjectsPage() {
                           </span>
                         </>
                       )}
+                      {a.event_type === "file.edited" && a.detail && (() => {
+                        try {
+                          const d = JSON.parse(a.detail);
+                          if (d.file_path) return <> <span className="font-mono" style={{ color: "var(--color-text-secondary)" }}>{d.file_path.split("/").pop()}</span></>;
+                        } catch {}
+                        return null;
+                      })()}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{a.project_name}</span>
