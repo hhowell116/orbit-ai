@@ -192,6 +192,8 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "input", data: cmd + "\r" }));
     }
+    // Refocus terminal so user can keep typing immediately
+    termInstance.current?.focus();
   }
 
   async function handleImageUpload(file: File) {
@@ -244,6 +246,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   function selectModel(modelId: string) {
     sendCommand(`/model ${modelId}`);
     setShowModelPicker(false);
+    setTimeout(() => termInstance.current?.focus(), 100);
   }
 
   const launchOptions = [
@@ -388,7 +391,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
                 {c.label}
               </button>
             ))}
-          {/* Paste + Token Paste + Upload buttons */}
+          {/* Paste + Upload buttons */}
           <span style={{ width: "1px", height: "16px", background: "var(--color-border)", margin: "0 2px" }} />
           <button onClick={async () => {
             try {
@@ -397,31 +400,13 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
                 wsRef.current.send(JSON.stringify({ type: "input", data: text }));
               }
             } catch {}
+            termInstance.current?.focus();
           }} title="Paste text from clipboard"
             className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
             style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
             Paste
-          </button>
-          <button onClick={async () => {
-            try {
-              const text = await navigator.clipboard.readText();
-              if (text && wsRef.current?.readyState === WebSocket.OPEN) {
-                // Clean: strip newlines, whitespace, then send text + small delay + Enter
-                const cleaned = text.replace(/[\r\n]/g, "").trim();
-                wsRef.current.send(JSON.stringify({ type: "input", data: cleaned }));
-                setTimeout(() => {
-                  wsRef.current?.send(JSON.stringify({ type: "input", data: "\r" }));
-                }, 100);
-              }
-            } catch {}
-          }} title="Paste token/password and press Enter (for login prompts)"
-            className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
-            style={{ background: "var(--color-bg-elevated)", color: "var(--color-success)", border: "1px solid var(--color-border)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-success)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
-            Paste Token
           </button>
           <label title="Upload image to project" className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
             style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
