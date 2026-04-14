@@ -153,32 +153,63 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     };
   }, [token, projectId]);
 
+  function sendCommand(cmd: string) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "input", data: cmd + "\r" }));
+    }
+  }
+
+  const claudeCommands = [
+    { label: "claude", cmd: "claude", desc: "Start Claude Code", color: "var(--color-primary)" },
+    { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions", desc: "Start with auto-approve", color: "var(--color-warning)" },
+    { label: "/plan", cmd: "/plan", desc: "Enter plan mode", color: "var(--color-accent)" },
+    { label: "/compact", cmd: "/compact", desc: "Compact context", color: "var(--color-secondary)" },
+    { label: "/model", cmd: "/model", desc: "Switch model", color: "var(--color-text-secondary)" },
+    { label: "/clear", cmd: "/clear", desc: "Clear conversation", color: "var(--color-text-secondary)" },
+    { label: "/cost", cmd: "/cost", desc: "Show token usage", color: "var(--color-text-secondary)" },
+    { label: "/help", cmd: "/help", desc: "Show help", color: "var(--color-text-muted)" },
+  ];
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#0d1117" }}>
-      {/* Terminal header */}
-      <div className="flex items-center justify-between px-3 py-1.5 shrink-0"
-        style={{ background: "var(--color-bg-surface)", borderBottom: "1px solid var(--color-border)" }}>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
-            Terminal
-          </span>
-          <span className={`w-1.5 h-1.5 rounded-full ${status === "connected" ? "animate-none" : "animate-pulse"}`}
-            style={{
-              background: status === "connected" ? "var(--color-success)"
+      {/* Terminal header + Claude buttons */}
+      <div className="shrink-0" style={{ background: "var(--color-bg-surface)", borderBottom: "1px solid var(--color-border)" }}>
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+              Terminal
+            </span>
+            <span className={`w-1.5 h-1.5 rounded-full ${status === "connected" ? "animate-none" : "animate-pulse"}`}
+              style={{
+                background: status === "connected" ? "var(--color-success)"
+                  : status === "connecting" ? "var(--color-warning)"
+                  : "var(--color-error)"
+              }} />
+            <span className="text-xs" style={{
+              color: status === "connected" ? "var(--color-success)"
                 : status === "connecting" ? "var(--color-warning)"
                 : "var(--color-error)"
-            }} />
-          <span className="text-xs" style={{
-            color: status === "connected" ? "var(--color-success)"
-              : status === "connecting" ? "var(--color-warning)"
-              : "var(--color-error)"
-          }}>
-            {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
-          </span>
+            }}>
+              {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
+            </span>
+          </div>
+          {errorMsg && (
+            <span className="text-xs" style={{ color: "var(--color-error)" }}>{errorMsg}</span>
+          )}
         </div>
-        {errorMsg && (
-          <span className="text-xs" style={{ color: "var(--color-error)" }}>{errorMsg}</span>
-        )}
+
+        {/* Claude Code quick buttons */}
+        <div className="flex items-center gap-1.5 px-3 pb-2 flex-wrap">
+          {claudeCommands.map((c) => (
+            <button key={c.cmd} onClick={() => sendCommand(c.cmd)} title={c.desc}
+              className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+              style={{ background: "var(--color-bg-elevated)", color: c.color, border: "1px solid var(--color-border)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.color; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+              {c.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Terminal */}

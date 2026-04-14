@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useBroker } from "../hooks/useBroker";
 import { useBridge } from "../hooks/useBridge";
+import { useAuthStore } from "../stores/authStore";
 import { ChatWindow } from "../components/ChatWindow";
 import { WebTerminal } from "../components/WebTerminal";
 import { FileLockIndicator } from "../components/FileLockIndicator";
@@ -56,6 +57,7 @@ export function ProjectPage() {
 
   // Rules state
   const [projectRules, setProjectRules] = useState("");
+  const [teamRules, setTeamRules] = useState("");
   const [showRulesEditor, setShowRulesEditor] = useState(false);
   const [rulesSaving, setRulesSaving] = useState(false);
 
@@ -79,6 +81,13 @@ export function ProjectPage() {
     broker.getProjectRules(projectId)
       .then((d: any) => setProjectRules(d.rules || ""))
       .catch(() => {});
+    // Fetch team rules as fallback
+    const teamId = useAuthStore.getState().activeTeam?.id;
+    if (teamId) {
+      broker.getTeamRules(teamId)
+        .then((d: any) => setTeamRules(d.rules || ""))
+        .catch(() => {});
+    }
   }, [projectId]);
 
   async function handleSaveProjectRules() {
@@ -369,8 +378,15 @@ export function ProjectPage() {
               <p className="text-xs line-clamp-3 font-mono" style={{ color: "var(--color-text-muted)", whiteSpace: "pre-wrap" }}>
                 {projectRules.slice(0, 150)}{projectRules.length > 150 ? "..." : ""}
               </p>
+            ) : teamRules ? (
+              <div>
+                <p className="text-xs mb-1" style={{ color: "var(--color-accent)" }}>Using team rules</p>
+                <p className="text-xs line-clamp-3 font-mono" style={{ color: "var(--color-text-muted)", whiteSpace: "pre-wrap" }}>
+                  {teamRules.slice(0, 150)}{teamRules.length > 150 ? "..." : ""}
+                </p>
+              </div>
             ) : (
-              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No project rules set</p>
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No rules set</p>
             )}
           </div>
 
