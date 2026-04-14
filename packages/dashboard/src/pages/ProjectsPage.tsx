@@ -43,6 +43,7 @@ export function ProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [expandedStat, setExpandedStat] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user, logout, activeTeam } = useAuthStore();
   const broker = useBroker();
@@ -446,18 +447,24 @@ export function ProjectsPage() {
             </div>
           )}
 
-          {/* Stats bar */}
-          <div className="grid grid-cols-4 gap-3 mb-6">
+          {/* Stats bar — clickable */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
             {[
-              { label: "Projects", value: projects.length, color: "var(--color-primary)" },
-              { label: "Active Users", value: totalActiveUsers, color: "var(--color-success)" },
-              { label: "Sessions", value: activeSessions.length, color: "var(--color-secondary)" },
-              { label: "AI Thinking", value: thinkingSessions.length, color: "var(--color-accent)" },
+              { key: "projects", label: "Projects", value: projects.length, color: "var(--color-primary)" },
+              { key: "users", label: "Active Users", value: totalActiveUsers, color: "var(--color-success)" },
+              { key: "sessions", label: "Sessions", value: activeSessions.length, color: "var(--color-secondary)" },
+              { key: "thinking", label: "AI Thinking", value: thinkingSessions.length, color: "var(--color-accent)" },
             ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-lg p-4"
-                style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
+              <button
+                key={stat.key}
+                onClick={() => setExpandedStat(expandedStat === stat.key ? null : stat.key)}
+                className="rounded-lg p-4 text-left transition-all"
+                style={{
+                  background: expandedStat === stat.key ? "var(--color-bg-elevated)" : "var(--color-bg-surface)",
+                  border: `1px solid ${expandedStat === stat.key ? stat.color : "var(--color-border)"}`,
+                }}
+                onMouseEnter={(e) => { if (expandedStat !== stat.key) e.currentTarget.style.borderColor = stat.color; }}
+                onMouseLeave={(e) => { if (expandedStat !== stat.key) e.currentTarget.style.borderColor = "var(--color-border)"; }}
               >
                 <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--color-text-muted)" }}>
                   {stat.label}
@@ -465,39 +472,94 @@ export function ProjectsPage() {
                 <div className="text-2xl font-semibold font-mono" style={{ color: stat.color }}>
                   {stat.value}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
-          {/* Active AI sessions */}
-          {activeSessions.length > 0 && (
-            <div className="mb-6">
-              <h2 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>
-                Active AI Sessions
-              </h2>
-              <div className="space-y-2">
-                {activeSessions.slice(0, 5).map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-3 rounded-lg px-4 py-3"
-                    style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{
-                        background: s.status === "thinking" ? "var(--color-secondary)" : s.status === "error" ? "var(--color-error)" : "var(--color-success)",
-                        animation: s.status === "thinking" ? "pulse 2s infinite" : "none",
-                      }}
-                    />
-                    <span className="text-sm" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
-                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
-                    <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
-                    <span className="text-xs font-mono ml-auto" style={{ color: s.status === "thinking" ? "var(--color-secondary)" : "var(--color-text-muted)" }}>
-                      {s.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Expanded stat detail */}
+          {expandedStat && (
+            <div className="mb-6 rounded-lg p-4" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              {expandedStat === "projects" && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>All Projects</h3>
+                  {projects.length === 0 ? <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No projects yet</p> : (
+                    <div className="space-y-1.5">
+                      {projects.map((p) => (
+                        <button key={p.id} onClick={() => navigate(`/project/${p.id}`)}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors"
+                          style={{ background: "var(--color-bg-elevated)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-bg-hover)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-bg-elevated)")}>
+                          <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{p.name}</span>
+                          <div className="flex items-center gap-2">
+                            {p.active_users > 0 && <span className="text-xs" style={{ color: "var(--color-success)" }}>{p.active_users} online</span>}
+                            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{p.description || ""}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {expandedStat === "users" && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Active Users</h3>
+                  {activeSessions.length === 0 ? <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No other users online</p> : (
+                    <div className="space-y-1.5">
+                      {activeSessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                          <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                          <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
+                          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
+                          <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
+                          <span className="text-xs font-mono ml-auto" style={{ color: "var(--color-text-muted)" }}>{s.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {expandedStat === "sessions" && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Active Sessions</h3>
+                  {activeSessions.length === 0 ? <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No active sessions</p> : (
+                    <div className="space-y-1.5">
+                      {activeSessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                          <span className="w-2 h-2 rounded-full" style={{
+                            background: s.status === "thinking" ? "var(--color-secondary)" : s.status === "error" ? "var(--color-error)" : "var(--color-success)",
+                            animation: s.status === "thinking" ? "pulse 2s infinite" : "none",
+                          }} />
+                          <span className="text-sm" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
+                          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
+                          <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
+                          <span className="text-xs font-mono ml-auto px-2 py-0.5 rounded" style={{
+                            background: s.status === "thinking" ? "var(--color-secondary-muted)" : "var(--color-bg-hover)",
+                            color: s.status === "thinking" ? "var(--color-secondary)" : "var(--color-text-muted)",
+                          }}>{s.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {expandedStat === "thinking" && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>AI Thinking</h3>
+                  {thinkingSessions.length === 0 ? <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No AI sessions currently thinking</p> : (
+                    <div className="space-y-1.5">
+                      {thinkingSessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                          <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--color-accent)" }} />
+                          <span className="text-sm" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
+                          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>thinking in</span>
+                          <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

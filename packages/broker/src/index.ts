@@ -1371,6 +1371,16 @@ export default {
         const dbSession = db.query("SELECT s.*, u.display_name as user_display_name, p.name as project_name FROM sessions s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN projects p ON p.id = s.project_id WHERE s.id = ?").get(dbSessionId);
         broadcast("session.created", dbSession);
         ws.data.dbSessionId = dbSessionId;
+
+        // Log to activity feed
+        db.run(
+          "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.created', ?)",
+          [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
+        );
+        const activityEntry = db.query(
+          "SELECT a.*, u.display_name as user_display_name, p.name as project_name FROM activity a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN projects p ON p.id = a.project_id WHERE a.id = last_insert_rowid()"
+        ).get();
+        if (activityEntry) broadcast("activity", activityEntry);
       }
 
       // Wire PTY output to WebSocket clients (once per session, not per client)
@@ -1423,6 +1433,14 @@ export default {
           if (dbSessionId) {
             db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
             broadcast("session.ended", { id: dbSessionId });
+
+            // Log to activity feed
+            if (projectId) {
+              db.run(
+                "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
+                [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
+              );
+            }
           }
         }
       }
