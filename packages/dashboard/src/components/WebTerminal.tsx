@@ -162,6 +162,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const claudeCommands = [
     { label: "claude", cmd: "claude", desc: "Start Claude Code", color: "var(--color-primary)" },
     { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions", desc: "Start with auto-approve", color: "var(--color-warning)" },
+    { label: "/login", cmd: "/login", desc: "Log in to Claude", color: "var(--color-success)" },
     { label: "/plan", cmd: "/plan", desc: "Enter plan mode", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", desc: "Compact context", color: "var(--color-secondary)" },
     { label: "/model", cmd: "/model", desc: "Switch model", color: "var(--color-text-secondary)" },
