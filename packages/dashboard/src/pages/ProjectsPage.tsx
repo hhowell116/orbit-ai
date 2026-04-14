@@ -66,7 +66,7 @@ export function ProjectsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const totalActiveUsers = projects.reduce((sum, p) => sum + (p.active_users || 0), 0);
+  const totalActiveUsers = Math.max(1, projects.reduce((sum, p) => sum + (p.active_users || 0), 0));
   const activeSessions = sessions.filter((s) => s.status !== "ended");
   const thinkingSessions = sessions.filter((s) => s.status === "thinking");
 
@@ -454,6 +454,56 @@ export function ProjectsPage() {
               {error} — Make sure the broker server is running.
             </div>
           )}
+
+          {/* Team & Quick Actions */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* Team info */}
+            <div className="rounded-xl p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>Team</div>
+              <div className="text-lg font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name || "—"}</div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => navigate(`/teams/${activeTeam?.id}/settings`)}
+                  className="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                  style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                  Members & Rules
+                </button>
+                <button onClick={() => navigate("/connections")}
+                  className="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                  style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                  Connections
+                </button>
+              </div>
+            </div>
+
+            {/* Quick setup checklist */}
+            <div className="rounded-xl p-5 md:col-span-2" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <div className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Getting Started</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: "Set up Claude", desc: "Connect your Claude subscription", action: () => navigate("/connections"), icon: "ph-plug" },
+                  { label: "Set team rules", desc: "Define coding standards for Claude", action: () => navigate(`/teams/${activeTeam?.id}/settings`), icon: "ph-note-pencil" },
+                  { label: "Create a project", desc: "Clone a repo or start fresh", action: () => setShowNewProject(true), icon: "ph-folder-plus" },
+                  { label: "Connect GitHub", desc: "Push code with your token", action: () => navigate("/connections"), icon: "ph-github-logo" },
+                ].map((item) => (
+                  <button key={item.label} onClick={item.action}
+                    className="flex items-start gap-3 p-3 rounded-lg text-left transition-colors"
+                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; }}>
+                    <i className={`ph ${item.icon}`} style={{ fontSize: "16px", color: "var(--color-primary)", marginTop: "2px" }} />
+                    <div>
+                      <div className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>{item.label}</div>
+                      <div className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>{item.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           {/* Stats bar */}
           <div className="grid grid-cols-4 gap-3 mb-6">
