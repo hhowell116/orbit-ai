@@ -2,49 +2,71 @@
 
 ## What Is This
 
-Orbit AI is a multi-tenant, team-based AI coding platform. Teams sign up, create workspaces, add projects (via git clone, zip upload, or blank), and work with Claude AI to build and deploy code. File locks, activity feeds, real-time presence, and git integration keep team members coordinated. Available as a web app and native desktop app.
+Orbit AI is a multi-tenant, team-based AI coding platform. Teams sign up, create workspaces, add projects (via git clone, zip upload, or blank), and work with Claude AI to build and deploy code. The primary experience is a browser-based terminal running Claude Code — no desktop app required. File locks, activity feeds, real-time presence, and git integration keep team members coordinated.
 
 ---
 
 ## Infrastructure Overview
 
 ```
-[Desktop App (Tauri)]          [Browser]
-  ├── orbitai.work iframe        ↓
-  └── Embedded terminal     [Cloudflare Tunnel] → [Broker :5000]
-       ↓                                             |
-  Claude Code (local)                      +---------+---------+
-  (user's subscription)                    |         |         |
-                                      [Dashboard] [SQLite] [Projects]
-                                      (React SPA)  (team.db)  (git repos)
+[Browser]
+  ├── Terminal tab (xterm.js) ──WSS──→ [Broker :5000] ──→ PTY per user ──→ Claude Code
+  ├── Chat tab (API mode)     ──HTTP──→ [Broker :5000] ──→ Anthropic API
+  └── Dashboard               ──HTTP──→ [Broker :5000] ──→ SQLite + Projects
+                                            │
+                                     [Cloudflare Tunnel]
+                                            │
+                                       [Internet]
 ```
 
-**Two ways to use Orbit AI:**
+**How users access Claude Code:**
 
-1. **Website** (`orbitai.work`) — browser-based, team features + API key chat
-2. **Desktop app** (Tauri) — same website + embedded terminal running Claude Code with user's subscription (no API key needed)
+1. **Browser terminal (primary)** — xterm.js in browser connects via WebSocket to the broker, which spawns a PTY per user running Claude Code. No install needed.
+2. **API chat (fallback)** — Users provide an Anthropic API key. The broker calls the Claude API directly with prompt caching. Costs per-token, chat-only.
+3. **Desktop app (optional)** — A Tauri app exists for users who prefer a native window. Not required.
 
-The broker runs on a single VM behind a Cloudflare tunnel. It serves the React dashboard, API routes, and manages project files on disk.
+The broker runs on a single VM behind a Cloudflare tunnel. It serves the React dashboard, API routes, WebSocket terminal connections, and manages project files on disk.
 
 ---
 
 ## AI Integration — How Claude Works
 
-### Desktop App (Recommended)
-Users run Claude Code locally through the embedded terminal. Each user authenticates with their own Claude subscription (Pro/Max) — Orbit AI never touches their credentials. Team collaboration features (locks, activity, presence, git) work through the broker.
+### Browser Terminal (Primary)
 
-### Website Only (Fallback)
-Users provide an Anthropic API key in Connections. The broker calls the Claude API directly with prompt caching and token optimization. Costs per-token.
+Users open a project and use the Terminal tab. The browser connects via WebSocket to the broker, which spawns an isolated PTY running Claude Code. Each user gets their own PTY session with isolated config and credentials.
+
+**WebSocket terminal pipeline:**
+```
+xterm.js (browser) → WSS → Broker → node-pty (PTY per user) → Claude Code
+```
+
+**Per-user isolation:**
+- `CLAUDE_CONFIG_DIR` — separate config directory per user, preventing cross-contamination
+- `CLAUDE_CODE_OAUTH_TOKEN` — each user's auth token injected into their PTY environment
+
+**Authentication methods for Claude Code:**
+- **Setup token auth (recommended)** — `claude setup-token` configures the user's Claude subscription credentials. The broker injects the token via environment variable.
+- **API key (fallback)** — Users can provide an Anthropic API key in Connections, used for the Chat tab's API mode.
+
+**Session persistence:** PTY sessions survive browser disconnects. If a user closes their tab and reopens it, they reconnect to the same running PTY. The terminal state (scrollback, running processes) is preserved.
+
+**PTY implementation:** The broker uses `node-pty` for PTY spawning, with `Bun.spawn` as a fallback if node-pty is unavailable.
+
+### API Chat Mode (Fallback)
+
+Users provide an Anthropic API key in Connections. The broker calls the Claude API directly with prompt caching and token optimization. Costs per-token. Available in the Chat tab.
 
 ### Why Two Modes?
-Anthropic prohibits third-party tools from using subscription credentials. Claude Code is Anthropic's own tool, so running it locally is fully sanctioned. The desktop app gives users a terminal where they run Claude Code directly — we just provide the window and team features around it.
 
-| | Desktop App | Website Only |
-|--|------------|--------------|
+The browser terminal gives users the full Claude Code experience (file editing, terminal commands, tool use) through their own subscription at no extra cost. The API chat mode is a simpler fallback for users without a Claude subscription.
+
+| | Browser Terminal | API Chat |
+|--|-----------------|----------|
 | AI access | Claude Code (subscription) | Anthropic API (per-token) |
 | Cost to user | $0 extra (included in Pro/Max) | Pay per token |
-| Auth | User's own Claude login | API key in Connections |
+| Auth | Setup token (subscription) | API key in Connections |
 | Capabilities | Full (file edit, terminal, tools) | Chat only |
+| Requires install | No | No |
 
 ---
 
@@ -122,12 +144,14 @@ The tunnel stays running permanently. On deploys, only the broker restarts — z
 | Google Auth | Firebase Auth SDK | Google OAuth popup |
 | Encryption | AES-256-GCM (crypto.ts) | Token encryption at rest |
 | AI (API mode) | @anthropic-ai/sdk 0.88 | Claude chat with streaming |
-| AI (Desktop) | Claude Code CLI | Runs locally in embedded terminal |
+| AI (Terminal) | Claude Code CLI | Runs in per-user PTY via browser terminal |
+| PTY | node-pty (fallback: Bun.spawn) | Per-user terminal process spawning |
+| WebSocket | Built-in (Bun/Hono) | Browser terminal ↔ PTY communication |
+| Terminal UI | xterm.js | Terminal emulator in browser |
 | Frontend | React 19 + Vite 8 + Tailwind 4 | Dashboard SPA |
 | State | Zustand 5.0 | Auth + sessionStorage persistence |
 | Routing | react-router-dom 7.14 | SPA with auth guards |
-| Desktop App | Tauri v2 (Rust) | Native window + embedded PTY terminal |
-| Terminal | xterm.js + portable-pty | Terminal emulator in desktop app |
+| Desktop App | Tauri v2 (Rust) | Optional native window + embedded PTY |
 | Tunnel | cloudflared (named tunnel) | HTTPS tunnel to VM |
 | CI/CD | GitHub Actions | Auto-build desktop app on tag push |
 | Domain | orbitai.work (Cloudflare) | Permanent URL |
@@ -265,6 +289,8 @@ Format: `iv:ciphertext:tag` (hex-encoded). Even with direct DB access, tokens ar
 - No endpoint returns another user's tokens
 - Status endpoints only return `{ connected: true/false }`
 - Git push uses the current user's token, not a shared credential
+- Terminal PTYs are isolated: each user gets their own `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN`
+- PTY processes run in the user's project directory with scoped environment variables
 
 ### Team Ownership Transfer
 Team owners can transfer ownership to another member via `POST /teams/:id/transfer`. The old owner becomes admin, the new owner gets full control.
@@ -342,26 +368,65 @@ Team owners can transfer ownership to another member via `POST /teams/:id/transf
 | GET | /api/activity/recent | Activity feed |
 | GET | /api/activity/stream | SSE real-time stream |
 
+### WebSocket
+| Path | Description |
+|------|-------------|
+| /ws/terminal | Browser terminal ↔ PTY. Authenticated via JWT query param. |
+
 ---
 
 ## Frontend Pages
 
 | Route | Page | Auth | Description |
 |-------|------|------|-------------|
-| /login | LoginPage | Public | Google sign-in + download link |
+| /login | LoginPage | Public | Google sign-in |
 | /signup | SignupPage | Public | Create account + Google sign-up |
-| /download | DownloadPage | Public | Platform picker (Win/Mac/Linux) |
+| /download | DownloadPage | Public | Optional desktop app download (platform picker) |
 | /teams | TeamSelectionPage | Token | Create, join, or select team |
 | /teams/:id/settings | TeamSettingsPage | Token | Team rules, members, invites, ownership transfer |
 | /connections | ConnectionsPage | Token+Team | Personal API keys (Claude, GitHub) |
 | / | ProjectsPage | Token+Team | Dashboard with hamburger sidebar, activity feed, projects |
-| /project/:id | ProjectPage | Token+Team | Chat + sidebar (rules, git, locks, activity, users) |
+| /project/:id | ProjectPage | Token+Team | Terminal tab + Chat tab, sidebar (rules, git, locks, activity, users) |
 
 ### Key Components
+- **Terminal tab** — xterm.js connected via WebSocket to per-user PTY running Claude Code
+- **Chat tab** — API-mode chat with Claude (requires API key in Connections)
 - **ChatWindow** — Message input, streaming display, connection warning
 - **OrbitalBackground** — Animated starfield with twinkling stars, nebula gradients, shooting stars
 - **CommandPalette** — Ctrl+K project search
-- **Hamburger Sidebar** — Manage Team, Connections, Switch Team, Download App, Sign Out
+- **Hamburger Sidebar** — Manage Team, Connections, Switch Team, Sign Out
+
+---
+
+## WebSocket Terminal Architecture
+
+The browser terminal is the core of Orbit AI's Claude Code integration. Here is the full pipeline:
+
+```
+┌─────────────┐     WSS      ┌─────────────┐    stdin/stdout    ┌──────────────┐
+│  Browser     │ ──────────→  │   Broker     │ ────────────────→ │  PTY Process │
+│  (xterm.js)  │ ←────────── │  (WebSocket) │ ←──────────────── │  (node-pty)  │
+└─────────────┘              └─────────────┘                    └──────────────┘
+                                                                       │
+                                                                 Claude Code CLI
+                                                                 (user's subscription)
+```
+
+### Connection lifecycle:
+1. User opens Terminal tab in a project
+2. Browser establishes WSS connection to `/ws/terminal` with JWT auth
+3. Broker spawns a PTY (node-pty, fallback to Bun.spawn) in the project directory
+4. Environment is configured with `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN` for isolation
+5. Keystrokes flow from xterm.js → WebSocket → PTY stdin
+6. PTY stdout → WebSocket → xterm.js rendering
+7. If the browser disconnects, the PTY keeps running
+8. On reconnect, the user resumes the same session (scrollback and state intact)
+
+### Per-user environment variables:
+| Variable | Purpose |
+|----------|---------|
+| `CLAUDE_CONFIG_DIR` | Isolates Claude Code config per user |
+| `CLAUDE_CODE_OAUTH_TOKEN` | User's subscription auth token |
 
 ---
 
@@ -371,7 +436,7 @@ Orbit AI is a development environment, not a hosting platform. Users write code,
 
 ```
 1. Create project (clone repo, upload zip, or blank)
-2. Work with Claude (terminal in desktop app, or chat in browser)
+2. Work with Claude (Terminal tab for full Claude Code, Chat tab for API mode)
 3. See changes in Git panel (sidebar)
 4. Commit with a message
 5. Push → uses YOUR GitHub token → your repo
@@ -393,28 +458,15 @@ Each user's GitHub PAT is stored encrypted in `user_connections`. On push:
 
 ---
 
-## Desktop App (Tauri v2)
+## Desktop App (Tauri v2) — Optional
+
+The desktop app is an optional alternative for users who prefer a native window. It is **not required** — the browser terminal provides the same Claude Code experience.
 
 ### Architecture
 
 The desktop app has a **split view**:
 - **Top**: iframe loading `orbitai.work` — full dashboard with all team features
 - **Bottom**: embedded terminal (xterm.js + portable-pty) running the user's shell
-
-Users click the "claude" button or type `claude` to launch Claude Code in the terminal. Claude Code authenticates with their own subscription — Orbit AI never touches their credentials.
-
-### Terminal Features
-- Real PTY (portable-pty) — PowerShell on Windows, bash/zsh on Mac/Linux
-- xterm.js with Orbit AI color theme (dark space palette, orange cursor)
-- Draggable divider to resize split
-- Collapse/expand terminal panel
-- Quick-launch "claude" button
-
-### Tech
-- **Tauri v2** (Rust) — system WebView, ~2-5 MB installer
-- **portable-pty** — cross-platform PTY spawning
-- **xterm.js** — terminal emulator in the browser
-- **Tauri events** — PTY output streamed to frontend via `pty-output` events
 
 ### Building
 ```bash
@@ -434,11 +486,7 @@ git tag v0.1.0 && git push origin v0.1.0  # Triggers build + release
 ```
 
 ### Download Page
-`/download` on the site auto-detects the user's OS and shows download links from the latest GitHub Release.
-
-### Updates
-- **Website features**: instant — the iframe loads the live site
-- **Terminal/shell code**: via new releases (auto-updater planned)
+`/download` on the site auto-detects the user's OS and shows download links from the latest GitHub Release. The page is kept but not prominently linked — most users should use the browser terminal instead.
 
 ---
 
@@ -469,6 +517,7 @@ orbit-ai/
 │   ├── broker/
 │   │   ├── src/
 │   │   │   ├── index.ts        ← All API routes + static serving
+│   │   │   ├── terminal.ts     ← WebSocket terminal + PTY management
 │   │   │   ├── auth.ts         ← JWT + middleware
 │   │   │   ├── crypto.ts       ← AES-256-GCM encrypt/decrypt
 │   │   │   ├── db.ts           ← SQLite schema + migrations
@@ -487,7 +536,7 @@ orbit-ai/
 │   │   │   └── index.css       ← Tailwind theme + animations
 │   │   ├── dist/               ← Built static files (served by broker)
 │   │   └── package.json
-│   ├── desktop/
+│   ├── desktop/                ← Optional Tauri desktop app
 │   │   ├── package.json        ← Tauri CLI
 │   │   ├── BUILD.md            ← Build instructions
 │   │   ├── icon.svg            ← App icon source (planet + ring)
@@ -517,10 +566,9 @@ orbit-ai/
 
 | Port | Service | Notes |
 |------|---------|-------|
-| 5000 | Broker (API + dashboard) | Main server |
+| 5000 | Broker (API + dashboard + WebSocket) | Main server |
 | 3000 | Vite dev server | Development only |
 | 4096+ | Reserved for OpenCode | Per-project, future use |
-| 9876 | Local WebSocket bridge | Desktop app ↔ browser (planned) |
 
 ---
 
@@ -545,7 +593,7 @@ cd packages/dashboard && npx vite &
 git push origin main
 # VM auto-pulls within 60s, rebuilds dashboard, restarts broker
 
-# Desktop app dev
+# Desktop app dev (optional)
 cd packages/desktop && npm run dev
 
 # Release desktop app
