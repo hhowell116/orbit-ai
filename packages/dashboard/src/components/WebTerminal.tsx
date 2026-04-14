@@ -349,9 +349,12 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
             try {
               const text = await navigator.clipboard.readText();
               if (text && wsRef.current?.readyState === WebSocket.OPEN) {
-                // Send raw text + Enter — designed for password/token prompts
-                const cleaned = text.trim();
-                wsRef.current.send(JSON.stringify({ type: "input", data: cleaned + "\r" }));
+                // Clean: strip newlines, whitespace, then send text + small delay + Enter
+                const cleaned = text.replace(/[\r\n]/g, "").trim();
+                wsRef.current.send(JSON.stringify({ type: "input", data: cleaned }));
+                setTimeout(() => {
+                  wsRef.current?.send(JSON.stringify({ type: "input", data: "\r" }));
+                }, 100);
               }
             } catch {}
           }} title="Paste token/password and press Enter (for login prompts)"
