@@ -15,6 +15,7 @@ export function ConnectionsPage() {
 
   // Claude form
   const [apiKey, setApiKey] = useState("");
+  const [claudeMethod, setClaudeMethod] = useState<"setup_token" | "api_key">("setup_token");
   const [claudeSaving, setClaudeSaving] = useState(false);
   const [claudeMsg, setClaudeMsg] = useState("");
 
@@ -171,36 +172,103 @@ export function ConnectionsPage() {
               </div>
             </div>
 
-            {/* API key input */}
+            {/* Auth setup */}
             {!claudeConnected && !loading && (
               <div className="px-6 pb-6" style={{ borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
-                <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
-                  Enter your Anthropic API key. Get one at{" "}
-                  <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
-                    style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
-                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
-                    onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                    onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                    placeholder="sk-ant-..."
-                  />
-                  <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
-                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                {/* Method toggle */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setClaudeMethod("setup_token")}
+                    className="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all"
                     style={{
-                      background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
-                      color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                      background: claudeMethod === "setup_token" ? "var(--color-primary-muted)" : "var(--color-bg-elevated)",
+                      color: claudeMethod === "setup_token" ? "var(--color-primary)" : "var(--color-text-muted)",
+                      border: `1px solid ${claudeMethod === "setup_token" ? "var(--color-primary)" : "var(--color-border)"}`,
                     }}>
-                    {claudeSaving ? "Saving..." : "Connect"}
+                    Setup Token (Recommended)
+                  </button>
+                  <button
+                    onClick={() => setClaudeMethod("api_key")}
+                    className="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all"
+                    style={{
+                      background: claudeMethod === "api_key" ? "var(--color-primary-muted)" : "var(--color-bg-elevated)",
+                      color: claudeMethod === "api_key" ? "var(--color-primary)" : "var(--color-text-muted)",
+                      border: `1px solid ${claudeMethod === "api_key" ? "var(--color-primary)" : "var(--color-border)"}`,
+                    }}>
+                    API Key
                   </button>
                 </div>
+
+                {claudeMethod === "setup_token" ? (
+                  <div>
+                    <div className="rounded-lg p-3 mb-3" style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}>
+                      <p className="text-xs font-medium mb-2" style={{ color: "var(--color-text-primary)" }}>How to get your setup token:</p>
+                      <ol className="text-xs space-y-1.5" style={{ color: "var(--color-text-secondary)", paddingLeft: "16px" }}>
+                        <li>Open a terminal on your computer</li>
+                        <li>Run: <code className="px-1 py-0.5 rounded text-xs" style={{ background: "var(--color-bg-hover)", color: "var(--color-primary)" }}>claude setup-token</code></li>
+                        <li>Sign in when prompted (uses your Claude subscription)</li>
+                        <li>Copy the token that starts with <code style={{ color: "var(--color-primary)" }}>sk-ant-oat01-...</code></li>
+                        <li>Paste it below</li>
+                      </ol>
+                      <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
+                        This uses your existing Claude Pro/Max subscription — no extra API charges.
+                        Token is valid for 1 year.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
+                        style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                        onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                        onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                        placeholder="sk-ant-oat01-..."
+                      />
+                      <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
+                        className="px-4 py-2 rounded-lg text-sm font-medium"
+                        style={{
+                          background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
+                          color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                        }}>
+                        {claudeSaving ? "Saving..." : "Connect"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs mb-3" style={{ color: "var(--color-text-secondary)" }}>
+                      Enter your Anthropic API key. Get one at{" "}
+                      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
+                        style={{ color: "var(--color-primary)" }}>console.anthropic.com</a>.
+                      Billed per-token.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
+                        style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                        onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                        onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                        placeholder="sk-ant-api..."
+                      />
+                      <button onClick={handleSaveClaude} disabled={claudeSaving || !apiKey}
+                        className="px-4 py-2 rounded-lg text-sm font-medium"
+                        style={{
+                          background: claudeSaving || !apiKey ? "var(--color-bg-hover)" : "var(--color-primary)",
+                          color: claudeSaving || !apiKey ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                        }}>
+                        {claudeSaving ? "Saving..." : "Connect"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
-                  Your key is stored securely and only used for your sessions. Other team members cannot see it.
+                  Your token is stored securely and only used for your sessions. Other team members cannot see it.
                 </p>
                 {claudeMsg && (
                   <p className="text-xs mt-2" style={{ color: claudeMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{claudeMsg}</p>

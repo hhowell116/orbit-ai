@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useBroker } from "../hooks/useBroker";
 import { useBridge } from "../hooks/useBridge";
 import { ChatWindow } from "../components/ChatWindow";
+import { WebTerminal } from "../components/WebTerminal";
 import { FileLockIndicator } from "../components/FileLockIndicator";
 import type { Message } from "../components/MessageBubble";
 
@@ -51,6 +52,7 @@ export function ProjectPage() {
   const [sessionStatus, setSessionStatus] = useState<"idle" | "thinking" | "error">("idle");
   const [loadError, setLoadError] = useState("");
   const [claudeConnected, setClaudeConnected] = useState<boolean | null>(null);
+  const [activeTab, setActiveTab] = useState<"terminal" | "chat">("terminal");
 
   // Rules state
   const [projectRules, setProjectRules] = useState("");
@@ -277,9 +279,38 @@ export function ProjectPage() {
 
       {/* Main: 70/30 split */}
       <div className="flex-1 flex min-h-0">
-        {/* Chat */}
+        {/* Terminal / Chat */}
         <div className="flex-[7] flex flex-col min-h-0" style={{ borderRight: "1px solid var(--color-border)" }}>
-          <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} claudeConnected={claudeConnected || bridgeConnected} />
+          {/* Tab bar */}
+          <div className="flex shrink-0" style={{ borderBottom: "1px solid var(--color-border)" }}>
+            <button onClick={() => setActiveTab("terminal")}
+              className="px-4 py-2 text-xs font-medium transition-colors"
+              style={{
+                color: activeTab === "terminal" ? "var(--color-primary)" : "var(--color-text-muted)",
+                borderBottom: activeTab === "terminal" ? "2px solid var(--color-primary)" : "2px solid transparent",
+                background: activeTab === "terminal" ? "var(--color-bg-elevated)" : "transparent",
+              }}>
+              Terminal
+            </button>
+            <button onClick={() => setActiveTab("chat")}
+              className="px-4 py-2 text-xs font-medium transition-colors"
+              style={{
+                color: activeTab === "chat" ? "var(--color-primary)" : "var(--color-text-muted)",
+                borderBottom: activeTab === "chat" ? "2px solid var(--color-primary)" : "2px solid transparent",
+                background: activeTab === "chat" ? "var(--color-bg-elevated)" : "transparent",
+              }}>
+              Chat
+            </button>
+          </div>
+
+          {/* Tab content */}
+          <div className="flex-1 min-h-0">
+            {activeTab === "terminal" ? (
+              <WebTerminal projectId={projectId} />
+            ) : (
+              <ChatWindow messages={messages} sessionStatus={sessionStatus} onSendMessage={handleSendMessage} onAbort={handleAbort} claudeConnected={claudeConnected || bridgeConnected} />
+            )}
+          </div>
         </div>
 
         {/* Sidebar */}
