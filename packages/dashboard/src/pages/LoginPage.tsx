@@ -9,6 +9,9 @@ import { OrbitalBackground } from "../components/OrbitalBackground";
 export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showLogin, setShowLogin] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const navigate = useNavigate();
   const { login, selectTeam } = useAuthStore();
   const broker = useBroker();
@@ -25,6 +28,21 @@ export function LoginPage() {
       }
     } else {
       navigate("/teams");
+    }
+  }
+
+  async function handleManualLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!username || !password) return;
+    setError("");
+    setLoading(true);
+    try {
+      const data = await broker.login(username, password);
+      await handlePostLogin(data);
+    } catch (err: any) {
+      setError(err.message || "Login failed");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -129,16 +147,63 @@ export function LoginPage() {
             {loading ? "Connecting..." : "Continue with Google"}
           </button>
 
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
+            <button onClick={() => setShowLogin(!showLogin)} className="text-xs transition-colors"
+              style={{ color: "var(--color-text-muted)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+              {showLogin ? "Hide" : "Login with username"}
+            </button>
+            <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
+          </div>
+
+          {/* Username/password login */}
+          {showLogin && (
+            <form onSubmit={handleManualLogin} className="space-y-3">
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username"
+                className="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none"
+                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-3 py-2.5 rounded-lg text-sm focus:outline-none"
+                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+              />
+              <button type="submit" disabled={loading || !username || !password}
+                className="w-full py-2.5 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  background: loading || !username || !password ? "var(--color-bg-hover)" : "var(--color-primary)",
+                  color: loading || !username || !password ? "var(--color-text-muted)" : "var(--color-text-inverse)",
+                }}>
+                {loading ? "Signing in..." : "Sign In"}
+              </button>
+            </form>
+          )}
+
           {error && (
             <p className="mt-4 text-sm text-center" style={{ color: "var(--color-error)" }}>
               {error}
             </p>
           )}
 
-          <p className="mt-6 text-center text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
-            Sign in or create an account instantly with your Google account.
-            <br />No separate registration needed.
-          </p>
+          {!showLogin && (
+            <p className="mt-4 text-center text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
+              Sign in with your Google account or use a username.
+            </p>
+          )}
         </div>
 
       </div>
