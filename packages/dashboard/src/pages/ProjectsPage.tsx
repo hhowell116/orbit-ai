@@ -505,19 +505,24 @@ export function ProjectsPage() {
               {expandedStat === "users" && (
                 <div>
                   <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Active Users</h3>
-                  {activeSessions.length === 0 ? <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No other users online</p> : (
-                    <div className="space-y-1.5">
-                      {activeSessions.map((s) => (
-                        <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
-                          <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
-                          <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
-                          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
-                          <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
-                          <span className="text-xs font-mono ml-auto" style={{ color: "var(--color-text-muted)" }}>{s.status}</span>
-                        </div>
-                      ))}
+                  <div className="space-y-1.5">
+                    {/* Always show yourself */}
+                    <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                      <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                      <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{user?.display_name}</span>
+                      <span className="text-xs ml-auto px-1.5 py-0.5 rounded" style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>you</span>
                     </div>
-                  )}
+                    {/* Other users with active sessions */}
+                    {activeSessions.filter((s) => s.user_display_name !== user?.display_name).map((s) => (
+                      <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                        <span className="text-sm font-medium" style={{ color: "var(--color-primary)" }}>{s.user_display_name}</span>
+                        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>in</span>
+                        <span className="text-sm" style={{ color: "var(--color-text-primary)" }}>{s.project_name}</span>
+                        <span className="text-xs font-mono ml-auto" style={{ color: "var(--color-text-muted)" }}>{s.status}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {expandedStat === "sessions" && (
