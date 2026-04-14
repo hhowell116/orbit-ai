@@ -1368,6 +1368,11 @@ export default {
       // Register presence — create/update a DB session so other users see this person
       if (projectId) {
         const dbSessionId = `terminal-${userId}-${projectId}`;
+
+        // Check if this is a new session or a reconnect
+        const existingSession = db.query("SELECT id, status FROM sessions WHERE id = ?").get(dbSessionId) as any;
+        const isNewSession = !existingSession || existingSession.status === "ended";
+
         db.run(
           "INSERT OR REPLACE INTO sessions (id, project_id, user_id, title, status, updated_at) VALUES (?, ?, ?, 'Terminal', 'idle', CURRENT_TIMESTAMP)",
           [dbSessionId, projectId, userId]
@@ -1376,15 +1381,17 @@ export default {
         broadcast("session.created", dbSession);
         ws.data.dbSessionId = dbSessionId;
 
-        // Log to activity feed
-        db.run(
-          "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.created', ?)",
-          [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
-        );
-        const activityEntry = db.query(
-          "SELECT a.*, u.display_name as user_display_name, p.name as project_name FROM activity a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN projects p ON p.id = a.project_id WHERE a.id = last_insert_rowid()"
-        ).get();
-        if (activityEntry) broadcast("activity", activityEntry);
+        // Only log activity for genuinely new sessions, not reconnects
+        if (isNewSession) {
+          db.run(
+            "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.created', ?)",
+            [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
+          );
+          const activityEntry = db.query(
+            "SELECT a.*, u.display_name as user_display_name, p.name as project_name FROM activity a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN projects p ON p.id = a.project_id WHERE a.id = last_insert_rowid()"
+          ).get();
+          if (activityEntry) broadcast("activity", activityEntry);
+        }
 
         // Start file watcher for auto-locking
         const projectData = db.query("SELECT path FROM projects WHERE id = ?").get(projectId) as { path: string } | null;
@@ -1441,6 +1448,9 @@ export default {
           console.log(`[ws] All clients disconnected from ${sessionKey} — session persists`);
           // Update presence — mark session as ended so other users see them leave
           if (dbSessionId) {
+            // Only log ended if session was actually active (not already ended)
+            const wasActive = db.query("SELECT status FROM sessions WHERE id = ? AND status != 'ended'").get(dbSessionId);
+
             db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
             broadcast("session.ended", { id: dbSessionId });
 
@@ -1448,11 +1458,13 @@ export default {
             if (projectId) {
               stopWatching(userId, projectId);
 
-              // Log to activity feed
-              db.run(
-                "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
-                [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
-              );
+              // Only log to activity if it was a real session end, not a brief reconnect blip
+              if (wasActive) {
+                db.run(
+                  "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
+                  [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
+                );
+              }
             }
           }
         }

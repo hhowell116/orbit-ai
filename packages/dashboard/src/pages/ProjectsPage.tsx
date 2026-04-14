@@ -85,7 +85,8 @@ export function ProjectsPage() {
   const eventIcons: Record<string, string> = {
     "file.edited": "~",
     "bash.ran": "$",
-    "session.created": "+",
+    "session.created": "→",
+    "session.ended": "←",
     "session.compacted": "z",
     "file.lock.acquired": "#",
     "file.lock.released": "-",
@@ -677,7 +678,15 @@ export function ProjectsPage() {
                       <span style={{ color: "var(--color-primary)" }}>{a.user_display_name}</span>
                       {" "}
                       <span style={{ color: "var(--color-text-muted)" }}>
-                        {a.event_type.replace(".", " ").replace("file ", "").replace("session ", "")}
+                        {({
+                          "session.created": "joined",
+                          "session.ended": "left",
+                          "file.edited": "edited",
+                          "file.lock.acquired": "locked",
+                          "file.lock.released": "unlocked",
+                          "bash.ran": "ran command",
+                          "session.compacted": "compacted session",
+                        } as Record<string, string>)[a.event_type] || a.event_type.replace(".", " ")}
                       </span>
                       {a.file_path && (
                         <>
