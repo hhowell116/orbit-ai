@@ -112,6 +112,7 @@ export async function createSession(
     PTY_COLS: String(cols),
     PTY_ROWS: String(rows),
     PTY_PORT: "0",
+    CLAUDE_SUPPRESS_INSTALLER_WARNING: "1",
   };
 
   if (claudeAuth) {
