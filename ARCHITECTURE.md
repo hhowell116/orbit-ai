@@ -72,37 +72,55 @@ The browser terminal gives users the full Claude Code experience (file editing, 
 
 ## Team & Project Rules System
 
-Rules are markdown instructions that Claude must follow. They're injected as cached system prompts to minimize token usage.
+Rules are markdown instructions that Claude must follow. They are written to a `CLAUDE.md` file in each project's root directory, which Claude Code reads automatically.
 
 ### Team Rules
-- Set by team owners/admins in Team Settings
-- Apply to ALL projects in the team
-- Great for: coding standards, token efficiency rules, behavior guidelines
-- Stored in `teams.rules` column
+- Set by team owners/admins in Team Settings → Rules tab
+- Stored as JSON array of `{title, content}` rule blocks in `teams.rules` column
+- Multiple rule blocks can be added (e.g. "Code Standards", "Security", "Testing")
+- Apply to ALL projects in the team — combined with project rules, never replaced
 
 ### Project Rules
 - Set by any team member in the project sidebar
-- Apply only to that specific project
-- Great for: tech stack, conventions, file structure, deployment notes
+- Apply only to that specific project (added on top of team rules)
 - Stored in `projects.rules` column
 
-### Default Token Optimization Template
-```markdown
-# Token Efficiency Rules
-- Be concise. Avoid unnecessary explanations.
-- Only read files directly relevant to the task.
-- Do not repeat back large blocks of code — reference by filename and line.
-- Summarize changes rather than showing full diffs.
-- Do not refactor code unrelated to the current task.
+### How Rules Reach Claude Code
+
+Rules are synced to `CLAUDE.md` files on disk via `rules-sync.ts`:
+
+```
+Dashboard (save rules)
+  → Broker stores in DB
+  → rules-sync.ts writes CLAUDE.md to project directory
+  → Claude Code reads CLAUDE.md automatically on startup
 ```
 
-### How Rules Are Sent to Claude
+**CLAUDE.md is auto-generated** in each project root with this structure:
+```markdown
+# Orbit AI Rules
+# This file is auto-generated from team and project rules.
+
+# ═══ Team Rules ═══
+## Code Standards
+- Follow existing code style...
+
+## Token Efficiency
+- Be concise...
+
+# ═══ Project Rules ═══
+- This project uses React + TypeScript...
 ```
-[Team Rules — prompt cached, 90% cheaper after first message]
-[Project Rules — prompt cached]
-[Conversation history]
-[User's message]
-```
+
+### When CLAUDE.md is regenerated
+- When team rules are saved → regenerates for ALL projects in the team
+- When project rules are saved → regenerates for that project
+- When a terminal session starts → ensures CLAUDE.md is up to date
+
+### Implementation
+- `packages/broker/src/rules-sync.ts` — parses rules from DB, writes CLAUDE.md
+- `syncTeamRules(teamId)` — syncs all projects in a team
+- `syncProjectRules(projectId)` — syncs one project
 
 ---
 
