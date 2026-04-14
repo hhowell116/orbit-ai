@@ -17,6 +17,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting");
   const [errorMsg, setErrorMsg] = useState("");
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showLaunchPicker, setShowLaunchPicker] = useState(false);
   const token = useAuthStore((s) => s.token);
   const reconnectTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -245,16 +246,20 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     setShowModelPicker(false);
   }
 
-  const claudeCommands = [
-    { label: "claude", cmd: "claude --model claude-opus-4-6", desc: "Start Claude Code (Opus 4.6)", color: "var(--color-primary)" },
-    { label: "Swap Model", cmd: null, desc: "Switch Claude model", color: "var(--color-secondary)", action: () => setShowModelPicker(true) },
-    { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions --model claude-opus-4-6", desc: "Start with auto-approve (Opus 4.6)", color: "var(--color-warning)" },
-    { label: "/login", cmd: "/login", desc: "Log in to Claude", color: "var(--color-success)" },
-    { label: "/plan", cmd: "/plan", desc: "Enter plan mode", color: "var(--color-accent)" },
-    { label: "/compact", cmd: "/compact", desc: "Compact context", color: "var(--color-secondary)" },
-    { label: "/clear", cmd: "/clear", desc: "Clear conversation", color: "var(--color-text-secondary)" },
-    { label: "/cost", cmd: "/cost", desc: "Show token usage", color: "var(--color-text-secondary)" },
-    { label: "/help", cmd: "/help", desc: "Show help", color: "var(--color-text-muted)" },
+  const launchOptions = [
+    { label: "Standard", desc: "Start Claude Code with default settings (Opus 4.6)", cmd: "claude --model claude-opus-4-6", icon: "▶" },
+    { label: "Skip Permissions", desc: "Auto-approve all file edits and commands — no confirmation prompts", cmd: "claude --dangerously-skip-permissions --model claude-opus-4-6", icon: "⚡" },
+    { label: "Plan Mode", desc: "Start in planning mode — Claude designs before implementing", cmd: "claude --model claude-opus-4-6", postCmd: "/plan", icon: "📋" },
+    { label: "Resume Session", desc: "Continue your last conversation where you left off", cmd: "claude --continue --model claude-opus-4-6", icon: "↩" },
+  ];
+
+  const slashCommands = [
+    { label: "/login", cmd: "/login", color: "var(--color-success)" },
+    { label: "/plan", cmd: "/plan", color: "var(--color-accent)" },
+    { label: "/compact", cmd: "/compact", color: "var(--color-secondary)" },
+    { label: "/clear", cmd: "/clear", color: "var(--color-text-secondary)" },
+    { label: "/cost", cmd: "/cost", color: "var(--color-text-secondary)" },
+    { label: "/help", cmd: "/help", color: "var(--color-text-muted)" },
   ];
 
   return (
@@ -292,6 +297,41 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
         </div>
       )}
 
+      {/* Launch Claude picker modal */}
+      {showLaunchPicker && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={() => setShowLaunchPicker(false)}>
+          <div className="w-full max-w-md rounded-xl p-6 shadow-2xl" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border-bright)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>Launch Claude</h2>
+            <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>Choose how to start your Claude Code session</p>
+            <div className="space-y-2">
+              {launchOptions.map((opt) => (
+                <button key={opt.label} onClick={() => {
+                  sendCommand(opt.cmd);
+                  if (opt.postCmd) setTimeout(() => sendCommand(opt.postCmd!), 2000);
+                  setShowLaunchPicker(false);
+                }}
+                  className="w-full text-left p-4 rounded-lg transition-all"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span style={{ fontSize: "14px" }}>{opt.icon}</span>
+                    <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{opt.label}</span>
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{opt.desc}</p>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowLaunchPicker(false)} className="w-full mt-3 py-2 rounded-lg text-xs"
+              style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Terminal header + Claude buttons */}
       <div className="shrink-0" style={{ background: "var(--color-bg-surface)", borderBottom: "1px solid var(--color-border)" }}>
         <div className="flex items-center justify-between px-3 py-1.5">
@@ -318,17 +358,19 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           )}
         </div>
 
-        {/* Claude Code quick buttons */}
-        <div className="flex items-center gap-1.5 px-3 pb-2 flex-wrap">
-          {claudeCommands.map((c) => (
-            <button key={c.label} onClick={() => c.action ? c.action() : c.cmd && sendCommand(c.cmd)} title={c.desc}
-              className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
-              style={{ background: "var(--color-bg-elevated)", color: c.color, border: "1px solid var(--color-border)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.color; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
-              {c.label}
-            </button>
-          ))}
+        {/* Toolbar: slash commands left, actions right */}
+        <div className="flex items-center justify-between px-3 pb-2">
+          {/* Left: slash commands + paste/upload */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {slashCommands.map((c) => (
+              <button key={c.cmd} onClick={() => sendCommand(c.cmd)} title={c.cmd}
+                className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+                style={{ background: "var(--color-bg-elevated)", color: c.color, border: "1px solid var(--color-border)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.color; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+                {c.label}
+              </button>
+            ))}
           {/* Paste + Token Paste + Upload buttons */}
           <span style={{ width: "1px", height: "16px", background: "var(--color-border)", margin: "0 2px" }} />
           <button onClick={async () => {
@@ -372,6 +414,25 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); e.target.value = ""; }} />
           </label>
+          </div>
+
+          {/* Right: Launch Claude + Swap Model */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setShowModelPicker(true)}
+              className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5"
+              style={{ background: "var(--color-bg-elevated)", color: "var(--color-secondary)", border: "1px solid var(--color-secondary-muted)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-secondary-muted)"; e.currentTarget.style.borderColor = "var(--color-secondary)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--color-bg-elevated)"; e.currentTarget.style.borderColor = "var(--color-secondary-muted)"; }}>
+              Swap Model
+            </button>
+            <button onClick={() => setShowLaunchPicker(true)}
+              className="text-xs px-4 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5"
+              style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-primary-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-primary)")}>
+              Launch Claude
+            </button>
+          </div>
         </div>
       </div>
 
