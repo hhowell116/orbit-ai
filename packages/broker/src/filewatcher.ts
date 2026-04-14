@@ -95,6 +95,13 @@ export function startWatching(
         .get(projectId, filePath);
 
       broadcastFn("lock.acquired", lock);
+
+      // Log file edit to activity feed
+      db.run(
+        "INSERT INTO activity (project_id, user_id, session_id, event_type, file_path) VALUES (?, ?, ?, 'file.edited', ?)",
+        [projectId, userId, sessionId, filePath]
+      );
+
       console.log(`[filewatcher] Auto-locked: ${filePath} for ${userId}`);
     });
 
