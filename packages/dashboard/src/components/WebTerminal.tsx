@@ -18,6 +18,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const [errorMsg, setErrorMsg] = useState("");
   const token = useAuthStore((s) => s.token);
   const reconnectTimer = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!termRef.current || !token) return;
@@ -124,6 +125,37 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
       }
     });
 
+    // Handle Ctrl+V paste and Ctrl+C copy
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === "keydown" && e.ctrlKey && e.key === "v") {
+        navigator.clipboard.readText().then((text) => {
+          if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "input", data: text }));
+          }
+        }).catch(() => {});
+        return false; // Prevent default
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.key === "c") {
+        const selection = term.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(() => {});
+          return false;
+        }
+        // If no selection, let Ctrl+C through as SIGINT
+        return true;
+      }
+      return true;
+    });
+
+    // Handle paste event (right-click paste, etc.)
+    termRef.current.addEventListener("paste", (e: ClipboardEvent) => {
+      e.preventDefault();
+      const text = e.clipboardData?.getData("text");
+      if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "input", data: text }));
+      }
+    });
+
     // Handle resize
     const ro = new ResizeObserver(() => {
       fitAddon.fit();
@@ -156,6 +188,47 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   function sendCommand(cmd: string) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "input", data: cmd + "\r" }));
+    }
+  }
+
+  async function handleImageUpload(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    // Upload image to the project directory on the VM via the broker
+    const token = useAuthStore.getState().token;
+    if (!token || !projectId) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Type the file path into the terminal so Claude can reference it
+        sendCommand(`# Image uploaded: ${file.name}`);
+      }
+    } catch {}
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleImageUpload(file);
+  }
+
+  function handlePasteImage(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) handleImageUpload(file);
+        return;
+      }
     }
   }
 
@@ -210,11 +283,36 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
               {c.label}
             </button>
           ))}
+          {/* Paste + Upload buttons */}
+          <button onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (text) sendCommand(text.trimEnd());
+            } catch {}
+          }} title="Paste from clipboard"
+            className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+            style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+            Paste
+          </button>
+          <label title="Upload image to project" className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+            style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-text-secondary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+            Upload Image
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); e.target.value = ""; }} />
+          </label>
         </div>
       </div>
 
-      {/* Terminal */}
-      <div ref={termRef} className="flex-1 min-h-0" style={{ padding: "4px" }} />
+      {/* Terminal — with drag & paste image support */}
+      <div ref={termRef} className="flex-1 min-h-0"
+        style={{ padding: "4px" }}
+        onDrop={handleFileDrop}
+        onDragOver={(e) => e.preventDefault()}
+        onPaste={handlePasteImage} />
     </div>
   );
 }
