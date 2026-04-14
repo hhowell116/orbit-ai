@@ -383,7 +383,8 @@ Team owners can transfer ownership to another member via `POST /teams/:id/transf
 | /signup | SignupPage | Public | Create account + Google sign-up |
 | /download | DownloadPage | Public | Optional desktop app download (platform picker) |
 | /teams | TeamSelectionPage | Token | Create, join, or select team |
-| /teams/:id/settings | TeamSettingsPage | Token | Team rules, members, invites, ownership transfer |
+| /teams/:id/settings#members | TeamSettingsPage | Token | Members tab: roles, invites, ownership transfer |
+| /teams/:id/settings#rules | TeamSettingsPage | Token | Rules tab: multiple rule blocks, all combined for Claude |
 | /connections | ConnectionsPage | Token+Team | Claude (setup token or API key) + GitHub token, side-by-side layout |
 | / | ProjectsPage | Token+Team | 3-column dashboard: left nav, center projects, right activity feed |
 | /project/:id | ProjectPage | Token+Team | Terminal tab + Chat tab, sidebar (rules, git, locks, activity, users) |
@@ -400,31 +401,49 @@ Team owners can transfer ownership to another member via `POST /teams/:id/transf
 │ + New Project│  Stats: Projects, Users,   │  user1       │
 │              │  Sessions, AI Thinking     │  edited file │
 │ Manage Team  │                            │              │
-│ Connections  │  Active AI Sessions        │  user2       │
-│ Switch Team  │                            │  created     │
-│              │  Project cards (2-col grid) │  session     │
+│ Team Rules   │  Active AI Sessions        │  user2       │
+│ Connections  │                            │  created     │
+│ Switch Team  │  Project cards (2-col grid) │  session     │
 │ ──────────── │                            │              │
 │ Team: name   │                            │              │
 └──────────────┴────────────────────────────┴──────────────┘
 ```
 
+### Team Settings Page
+
+Tabbed page controlled by URL hash:
+- **#members** — Member list, role management (owner/admin/member), invite code generation, ownership transfer
+- **#rules** — Multiple rule blocks, each with a title and content textarea. All blocks are stored as JSON array and combined when sent to Claude. Project rules add to team rules, never replace them.
+
 ### Project Page Layout
 
 ```
-┌──────────────────────────────────┬──────────────────┐
-│  [Terminal] [Chat]  tabs         │  Who's Here      │
-├──────────────────────────────────│  Project Rules   │
-│  Terminal toolbar:               │  File Locks      │
-│  [claude] [Swap Model] [/login]  │  Git             │
-│  [/plan] [/compact] [Paste] etc  │  Recent Activity │
-│                                  │                  │
-│  xterm.js terminal               │                  │
-│  (WebSocket → PTY on VM)         │                  │
-└──────────────────────────────────┴──────────────────┘
+┌──────────────────────────────────────────┬──────────────────┐
+│  [Terminal] [Chat]  tabs                 │  Who's Here      │
+├──────────────────────────────────────────│  Project Rules   │
+│  Left: slash commands              Right: │  File Locks      │
+│  [/login][/plan][/compact][/clear]       │  Git             │
+│  [/cost][/help] | [Paste][Paste Token]   │  Recent Activity │
+│  [Upload Image]    [Swap Model][Launch]  │                  │
+│                                          │                  │
+│  xterm.js terminal                       │                  │
+│  (WebSocket → PTY on VM, Opus 4.6)      │                  │
+└──────────────────────────────────────────┴──────────────────┘
 ```
 
+**Launch Claude popup** — opens when clicking "Launch Claude" button:
+- Standard: default Opus 4.6
+- Skip Permissions: auto-approve all (--dangerously-skip-permissions)
+- Plan Mode: starts Claude then enters /plan
+- Resume Session: continues last conversation (--continue)
+
+**Swap Model popup** — opens when clicking "Swap Model" button:
+- Opus 4.6 (Recommended) — most capable, 1M context
+- Sonnet 4.6 — fast, everyday coding
+- Haiku 4.5 (Fastest) — quick edits, simple tasks
+
 ### Key Components
-- **WebTerminal** — xterm.js connected via WebSocket to per-user PTY, Claude Code quick buttons (claude, Swap Model, Skip Perms, /login, /plan, /compact, /clear, /cost, /help), Paste, Paste Token, Upload Image
+- **WebTerminal** — xterm.js terminal with split toolbar: slash commands + paste/upload on left, Swap Model + Launch Claude on right. Default model: Opus 4.6.
 - **Chat tab** — API-mode chat with Claude (requires API key in Connections)
 - **OrbitalBackground** — Animated starfield with twinkling stars, nebula gradients, shooting stars
 - **CommandPalette** — Ctrl+K project search
