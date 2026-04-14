@@ -1361,6 +1361,18 @@ export default {
       if (!wsClients.has(sessionKey)) wsClients.set(sessionKey, new Set());
       wsClients.get(sessionKey)!.add(ws);
 
+      // Register presence — create/update a DB session so other users see this person
+      if (projectId) {
+        const dbSessionId = `terminal-${userId}-${projectId}`;
+        db.run(
+          "INSERT OR REPLACE INTO sessions (id, project_id, user_id, title, status, updated_at) VALUES (?, ?, ?, 'Terminal', 'idle', CURRENT_TIMESTAMP)",
+          [dbSessionId, projectId, userId]
+        );
+        const dbSession = db.query("SELECT s.*, u.display_name as user_display_name, p.name as project_name FROM sessions s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN projects p ON p.id = s.project_id WHERE s.id = ?").get(dbSessionId);
+        broadcast("session.created", dbSession);
+        ws.data.dbSessionId = dbSessionId;
+      }
+
       // Wire PTY output to WebSocket clients (once per session, not per client)
       wireSessionOutput(sessionKey, session);
 
@@ -1399,7 +1411,7 @@ export default {
     },
 
     close(ws: any) {
-      const { userId, projectId } = ws.data;
+      const { userId, projectId, dbSessionId } = ws.data;
       if (!userId) return;
       const sessionKey = projectId ? `${userId}:${projectId}` : userId;
       const clients = wsClients.get(sessionKey);
@@ -1407,6 +1419,11 @@ export default {
         clients.delete(ws);
         if (clients.size === 0) {
           console.log(`[ws] All clients disconnected from ${sessionKey} — session persists`);
+          // Update presence — mark session as ended so other users see them leave
+          if (dbSessionId) {
+            db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
+            broadcast("session.ended", { id: dbSessionId });
+          }
         }
       }
     },
