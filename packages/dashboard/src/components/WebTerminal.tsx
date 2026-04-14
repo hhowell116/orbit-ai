@@ -16,6 +16,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting");
   const [errorMsg, setErrorMsg] = useState("");
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const token = useAuthStore((s) => s.token);
   const reconnectTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -233,10 +234,21 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     }
   }
 
+  const models = [
+    { id: "claude-opus-4-6", label: "Opus 4.6", desc: "Most capable. Best for complex tasks, architecture, and deep reasoning. 1M context.", tier: "top" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", desc: "Fast and capable. Great balance of speed and quality for everyday coding.", tier: "mid" },
+    { id: "claude-haiku-4-5", label: "Haiku 4.5", desc: "Fastest and cheapest. Good for quick edits, simple tasks, and high-volume work.", tier: "fast" },
+  ];
+
+  function selectModel(modelId: string) {
+    sendCommand(`/model ${modelId}`);
+    setShowModelPicker(false);
+  }
+
   const claudeCommands = [
-    { label: "claude", cmd: "claude", desc: "Start Claude Code", color: "var(--color-primary)" },
-    { label: "Swap Model", cmd: "/model", desc: "Switch Claude model", color: "var(--color-secondary)" },
-    { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions", desc: "Start with auto-approve", color: "var(--color-warning)" },
+    { label: "claude", cmd: "claude --model claude-opus-4-6", desc: "Start Claude Code (Opus 4.6)", color: "var(--color-primary)" },
+    { label: "Swap Model", cmd: null, desc: "Switch Claude model", color: "var(--color-secondary)", action: () => setShowModelPicker(true) },
+    { label: "Skip Perms", cmd: "claude --dangerously-skip-permissions --model claude-opus-4-6", desc: "Start with auto-approve (Opus 4.6)", color: "var(--color-warning)" },
     { label: "/login", cmd: "/login", desc: "Log in to Claude", color: "var(--color-success)" },
     { label: "/plan", cmd: "/plan", desc: "Enter plan mode", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", desc: "Compact context", color: "var(--color-secondary)" },
@@ -247,6 +259,39 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#0d1117" }}>
+      {/* Model picker modal */}
+      {showModelPicker && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+          onClick={() => setShowModelPicker(false)}>
+          <div className="w-full max-w-md rounded-xl p-6 shadow-2xl" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border-bright)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold mb-1" style={{ color: "var(--color-text-primary)" }}>Swap Model</h2>
+            <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>Select a model for your Claude Code session</p>
+            <div className="space-y-2">
+              {models.map((m) => (
+                <button key={m.id} onClick={() => selectModel(m.id)}
+                  className="w-full text-left p-4 rounded-lg transition-all"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{m.label}</span>
+                    {m.tier === "top" && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "var(--color-primary-muted)", color: "var(--color-primary)" }}>Recommended</span>}
+                    {m.tier === "fast" && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>Fastest</span>}
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{m.desc}</p>
+                  <code className="text-xs mt-1 block" style={{ color: "var(--color-text-muted)", opacity: 0.6 }}>{m.id}</code>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowModelPicker(false)} className="w-full mt-3 py-2 rounded-lg text-xs"
+              style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Terminal header + Claude buttons */}
       <div className="shrink-0" style={{ background: "var(--color-bg-surface)", borderBottom: "1px solid var(--color-border)" }}>
         <div className="flex items-center justify-between px-3 py-1.5">
@@ -276,7 +321,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
         {/* Claude Code quick buttons */}
         <div className="flex items-center gap-1.5 px-3 pb-2 flex-wrap">
           {claudeCommands.map((c) => (
-            <button key={c.cmd} onClick={() => sendCommand(c.cmd)} title={c.desc}
+            <button key={c.label} onClick={() => c.action ? c.action() : c.cmd && sendCommand(c.cmd)} title={c.desc}
               className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
               style={{ background: "var(--color-bg-elevated)", color: c.color, border: "1px solid var(--color-border)" }}
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.color; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
