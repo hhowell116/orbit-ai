@@ -34,7 +34,7 @@ export function TeamSettingsPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState("");
   const [transferring, setTransferring] = useState(false);
-  const [teamRules, setTeamRules] = useState("");
+  const [ruleBlocks, setRuleBlocks] = useState<{ title: string; content: string }[]>([]);
   const [rulesSaving, setRulesSaving] = useState(false);
   const [rulesMsg, setRulesMsg] = useState("");
 
@@ -48,7 +48,17 @@ export function TeamSettingsPage() {
     if (!teamId) return;
     Promise.all([
       broker.getTeamMembers(teamId).then(setMembers),
-      broker.getTeamRules(teamId).then((d: any) => setTeamRules(d.rules || "")),
+      broker.getTeamRules(teamId).then((d: any) => {
+        const raw = d.rules || "";
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) { setRuleBlocks(parsed); return; }
+        } catch {}
+        // Legacy: single string → convert to one block
+        if (raw.trim()) {
+          setRuleBlocks([{ title: "General", content: raw }]);
+        }
+      }),
       isOwnerOrAdmin ? broker.getInvites(teamId).then(setInvites) : Promise.resolve(),
     ])
       .catch(() => {})
@@ -60,7 +70,7 @@ export function TeamSettingsPage() {
     setRulesSaving(true);
     setRulesMsg("");
     try {
-      await broker.setTeamRules(teamId, teamRules);
+      await broker.setTeamRules(teamId, JSON.stringify(ruleBlocks));
       setRulesMsg("Saved!");
       setTimeout(() => setRulesMsg(""), 3000);
     } catch (err: any) {
@@ -68,6 +78,19 @@ export function TeamSettingsPage() {
     } finally {
       setRulesSaving(false);
     }
+  }
+
+  function addRuleBlock() {
+    setRuleBlocks((prev) => [...prev, { title: "", content: "" }]);
+  }
+
+  function updateRuleBlock(index: number, field: "title" | "content", value: string) {
+    setRuleBlocks((prev) => prev.map((b, i) => i === index ? { ...b, [field]: value } : b));
+  }
+
+  function removeRuleBlock(index: number) {
+    if (!confirm("Remove this rule block?")) return;
+    setRuleBlocks((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleGenerateInvite() {
@@ -271,56 +294,89 @@ export function TeamSettingsPage() {
         ) : (
           /* ═══ RULES TAB ═══ */
           <div className="space-y-4">
-            {/* Main rules editor */}
-            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
-                    Team Rules
-                  </h2>
-                  <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
-                    Instructions Claude must follow for all projects. Sent as a system prompt with prompt caching.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {rulesMsg && (
-                    <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
-                  )}
-                  {isOwnerOrAdmin && (
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>Team Rules</h2>
+                <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+                  All rule blocks are combined and sent to Claude as a system prompt.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {rulesMsg && (
+                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
+                )}
+                {isOwnerOrAdmin && (
+                  <>
+                    <button onClick={addRuleBlock}
+                      className="text-xs px-3 py-2 rounded-lg font-medium transition-colors"
+                      style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                      + Add Rule Block
+                    </button>
                     <button onClick={handleSaveRules} disabled={rulesSaving}
                       className="text-xs px-4 py-2 rounded-lg font-medium"
                       style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
-                      {rulesSaving ? "Saving..." : "Save Rules"}
+                      {rulesSaving ? "Saving..." : "Save All"}
                     </button>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
-              <textarea
-                value={teamRules}
-                onChange={(e) => setTeamRules(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-sm font-mono focus:outline-none resize-y"
-                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.6", height: "calc(75vh - 200px)", minHeight: "300px" }}
-                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                placeholder={`# Team Rules for Claude
-
-## Token Efficiency
-- Be concise. Avoid unnecessary explanations.
-- Only read files that are directly relevant to the task.
-- Do not repeat back large blocks of code — reference by filename and line numbers.
-- Summarize changes rather than showing full diffs.
-
-## Code Standards
-- Follow existing code style and conventions.
-- Do not add comments unless the logic is non-obvious.
-- Do not refactor code that isn't related to the current task.
-
-## Behavior
-- Ask clarifying questions before making large changes.
-- Always explain what you changed and why in 1-2 sentences.`}
-                disabled={!isOwnerOrAdmin}
-              />
             </div>
+
+            {/* Rule blocks */}
+            {ruleBlocks.length === 0 ? (
+              <div className="rounded-lg p-8 text-center" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                <p className="text-sm mb-2" style={{ color: "var(--color-text-secondary)" }}>No rules yet</p>
+                <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>
+                  Add rule blocks to give Claude instructions for your team's projects.
+                </p>
+                {isOwnerOrAdmin && (
+                  <button onClick={addRuleBlock}
+                    className="text-xs px-4 py-2 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    + Add First Rule Block
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {ruleBlocks.map((block, i) => (
+                  <div key={i} className="rounded-lg overflow-hidden" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                    {/* Block header */}
+                    <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-bg-elevated)" }}>
+                      <input
+                        type="text"
+                        value={block.title}
+                        onChange={(e) => updateRuleBlock(i, "title", e.target.value)}
+                        placeholder="Rule name (e.g. Code Standards, Security, Testing...)"
+                        className="flex-1 text-sm font-medium focus:outline-none"
+                        style={{ background: "transparent", color: "var(--color-text-primary)", border: "none" }}
+                        disabled={!isOwnerOrAdmin}
+                      />
+                      {isOwnerOrAdmin && (
+                        <button onClick={() => removeRuleBlock(i)} className="text-xs px-1.5 py-0.5 rounded transition-colors"
+                          style={{ color: "var(--color-text-muted)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-error)"; e.currentTarget.style.background = "var(--color-error-muted)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "transparent"; }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    {/* Block content */}
+                    <textarea
+                      value={block.content}
+                      onChange={(e) => updateRuleBlock(i, "content", e.target.value)}
+                      className="w-full px-4 py-3 text-sm font-mono focus:outline-none resize-y"
+                      style={{ background: "transparent", color: "var(--color-text-primary)", border: "none", lineHeight: "1.6", minHeight: "150px" }}
+                      placeholder="Enter rules for Claude..."
+                      disabled={!isOwnerOrAdmin}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             <p className="text-xs text-center" style={{ color: "var(--color-text-muted)" }}>
               These rules apply to all projects in this team. Individual projects can add additional rules in the project sidebar — project rules are combined with team rules, not replaced.
