@@ -1,15 +1,25 @@
 // Terminal session manager — spawns per-user PTY sessions
-// Each user gets isolated Claude Code with their own subscription
+// Uses a Node.js worker with TCP socket because:
+// 1. node-pty doesn't work under Bun (PTY gets SIGHUP'd immediately)
+// 2. Bun's stdout pipes break with long-running subprocesses
 
 import { db } from "./db";
 import { decrypt } from "./crypto";
 import { mkdirSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
+import { spawn } from "bun";
+import { connect } from "net";
 
 const USERS_DATA_DIR = process.env.USERS_DATA_DIR || join(import.meta.dir, "..", "..", "..", "user-data");
 
 interface TerminalSession {
-  pty: any; // node-pty IPty
+  pty: {
+    pid: number;
+    onData: (cb: (data: string) => void) => void;
+    write: (data: string) => void;
+    resize: (cols: number, rows: number) => void;
+    kill: () => void;
+  };
   userId: string;
   projectId: string | null;
   lastActivity: number;
@@ -26,12 +36,18 @@ function ensureUserDir(userId: string): string {
   if (!existsSync(userDir)) mkdirSync(userDir, { recursive: true });
   if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
 
-  // Pre-populate onboarding bypass so Claude Code doesn't show the wizard
   const claudeJson = join(claudeDir, ".claude.json");
   if (!existsSync(claudeJson)) {
-    writeFileSync(claudeJson, JSON.stringify({
-      hasCompletedOnboarding: true,
-    }));
+    writeFileSync(claudeJson, JSON.stringify({ hasCompletedOnboarding: true }));
+  }
+
+  // Custom prompt so users don't see the VM hostname
+  const bashrc = join(userDir, ".bashrc");
+  if (!existsSync(bashrc)) {
+    writeFileSync(bashrc, [
+      'export PS1="\\[\\e[38;2;250;178;131m\\]orbit\\[\\e[0m\\]:\\[\\e[38;2;92;156;245m\\]\\W\\[\\e[0m\\]$ "',
+      'export TERM=xterm-256color',
+    ].join("\n"));
   }
 
   return claudeDir;
@@ -45,11 +61,7 @@ function getUserClaudeToken(userId: string): { token: string; type: "oauth" | "a
 
   try {
     const decrypted = decrypt(conn.token);
-    // Setup tokens start with sk-ant-oat
-    if (decrypted.startsWith("sk-ant-oat")) {
-      return { token: decrypted, type: "oauth" };
-    }
-    // API keys start with sk-ant-api
+    if (decrypted.startsWith("sk-ant-oat")) return { token: decrypted, type: "oauth" };
     return { token: decrypted, type: "apikey" };
   } catch {
     return null;
@@ -62,12 +74,12 @@ function sessionKey(userId: string, projectId?: string): string {
 }
 
 // Create or get a terminal session
-export function createSession(
+export async function createSession(
   userId: string,
   projectId: string | null,
   cols: number = 80,
   rows: number = 24,
-): TerminalSession | null {
+): Promise<TerminalSession | null> {
   const key = sessionKey(userId, projectId || undefined);
 
   // Return existing session if active
@@ -77,13 +89,10 @@ export function createSession(
     return existing;
   }
 
-  // Get user's Claude token
   const claudeAuth = getUserClaudeToken(userId);
-
-  // Set up isolated config directory
   const claudeConfigDir = ensureUserDir(userId);
+  const userHome = join(USERS_DATA_DIR, userId);
 
-  // Determine working directory
   let cwd = USERS_DATA_DIR;
   if (projectId) {
     const project = db.query("SELECT path FROM projects WHERE id = ?").get(projectId) as { path: string } | null;
@@ -92,16 +101,19 @@ export function createSession(
     }
   }
 
-  // Build environment
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
     CLAUDE_CONFIG_DIR: claudeConfigDir,
-    HOME: join(USERS_DATA_DIR, userId),
+    HOME: userHome,
+    BASH_ENV: join(userHome, ".bashrc"),
+    PTY_CWD: cwd,
+    PTY_COLS: String(cols),
+    PTY_ROWS: String(rows),
+    PTY_PORT: "0",
   };
 
-  // Set auth based on token type
   if (claudeAuth) {
     if (claudeAuth.type === "oauth") {
       env.CLAUDE_CODE_OAUTH_TOKEN = claudeAuth.token;
@@ -111,67 +123,86 @@ export function createSession(
   }
 
   try {
-    // Try to load node-pty
-    let pty: any;
-    try {
-      const nodePty = require("node-pty");
-      const shell = process.platform === "win32" ? "powershell.exe" : (process.env.SHELL || "/bin/bash");
-      pty = nodePty.spawn(shell, [], {
-        name: "xterm-256color",
-        cols,
-        rows,
-        cwd,
-        env,
-      });
-    } catch (ptyErr) {
-      // Fallback: use Bun.spawn with basic pipe (no PTY, but functional)
-      console.warn("[terminal] node-pty not available, falling back to Bun.spawn:", ptyErr);
-      const shell = process.env.SHELL || "/bin/bash";
-      const proc = Bun.spawn([shell], {
-        cwd,
-        env,
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+    const workerPath = join(import.meta.dir, "pty-worker.cjs");
+    const proc = spawn(["node", workerPath], {
+      env,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-      // Create a PTY-like interface
-      pty = {
-        pid: proc.pid,
-        onData: (cb: (data: string) => void) => {
-          // Read stdout
-          const reader = proc.stdout.getReader();
-          (async () => {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              cb(new TextDecoder().decode(value));
+    // Read the single startup message to get the TCP port
+    const reader = proc.stdout.getReader();
+    const { value } = await reader.read();
+    reader.releaseLock();
+    const startupLine = new TextDecoder().decode(value).trim().split("\n")[0];
+    const startupMsg = JSON.parse(startupLine);
+    const tcpPort: number = startupMsg.port;
+    const shellPid: number = startupMsg.pid;
+
+    console.log(`[terminal] Worker started: tcpPort=${tcpPort} shellPid=${shellPid} cwd=${cwd}`);
+
+    // Connect to the worker via TCP
+    const dataListeners: ((data: string) => void)[] = [];
+
+    const socket = connect({ port: tcpPort, host: "127.0.0.1" });
+
+    socket.on("connect", () => {
+      console.log(`[terminal] TCP connected to worker on port ${tcpPort}`);
+    });
+
+    let socketBuf = "";
+    socket.on("data", (chunk: Buffer) => {
+      socketBuf += chunk.toString();
+      const lines = socketBuf.split("\n");
+      socketBuf = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.t === "o") {
+            for (const cb of dataListeners) {
+              try { cb(msg.d); } catch {}
             }
-          })();
-          // Read stderr
-          const errReader = proc.stderr.getReader();
-          (async () => {
-            while (true) {
-              const { done, value } = await errReader.read();
-              if (done) break;
-              cb(new TextDecoder().decode(value));
-            }
-          })();
-        },
-        write: (data: string) => {
-          proc.stdin.write(new TextEncoder().encode(data));
-        },
-        resize: (_cols: number, _rows: number) => {
-          // No resize support in basic spawn mode
-        },
-        kill: () => {
-          proc.kill();
-        },
-      };
-    }
+          }
+        } catch {}
+      }
+    });
+
+    socket.on("error", (err: Error) => {
+      console.error(`[terminal] TCP error for ${key}: ${err.message}`);
+    });
+
+    socket.on("close", () => {
+      console.log(`[terminal] TCP closed for ${key}`);
+      sessions.delete(key);
+    });
+
+    // Log worker stderr
+    const errReader = proc.stderr.getReader();
+    (async () => {
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          const { done, value: val } = await errReader.read();
+          if (done) break;
+          console.error(`[terminal-worker] ${decoder.decode(val)}`);
+        }
+      } catch {}
+    })();
+
+    const socketWrite = (msg: string) => {
+      try { socket.write(msg + "\n"); } catch {}
+    };
 
     const session: TerminalSession = {
-      pty,
+      pty: {
+        pid: proc.pid,
+        onData: (cb: (data: string) => void) => { dataListeners.push(cb); },
+        write: (data: string) => { socketWrite(JSON.stringify({ t: "i", d: data })); },
+        resize: (c: number, r: number) => { socketWrite(JSON.stringify({ t: "r", c, r })); },
+        kill: () => { proc.kill(); },
+      },
       userId,
       projectId,
       lastActivity: Date.now(),
@@ -179,7 +210,7 @@ export function createSession(
     };
 
     // Buffer output for reconnection
-    pty.onData((data: string) => {
+    dataListeners.push((data: string) => {
       session.buffer.push(data);
       if (session.buffer.length > MAX_BUFFER_LINES) {
         session.buffer = session.buffer.slice(-MAX_BUFFER_LINES);
@@ -188,7 +219,7 @@ export function createSession(
     });
 
     sessions.set(key, session);
-    console.log(`[terminal] Created session for user ${userId}${projectId ? ` in project ${projectId}` : ''}`);
+    console.log(`[terminal] Session ready: ${key}`);
     return session;
   } catch (err) {
     console.error("[terminal] Failed to create session:", err);
@@ -238,5 +269,4 @@ export function cleanupIdleSessions(maxIdleMs: number = 30 * 60 * 1000) {
   }
 }
 
-// Start cleanup interval
 setInterval(() => cleanupIdleSessions(), 5 * 60 * 1000);

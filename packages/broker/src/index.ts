@@ -1345,12 +1345,12 @@ export default {
     return app.fetch(req, server);
   },
   websocket: {
-    open(ws: any) {
+    async open(ws: any) {
       const { userId, username, projectId } = ws.data;
       const sessionKey = projectId ? `${userId}:${projectId}` : userId;
 
       // Create or get terminal session
-      const session = createSession(userId, projectId);
+      const session = await createSession(userId, projectId);
       if (!session) {
         ws.send(JSON.stringify({ type: "error", message: "Failed to create terminal session. Check server logs." }));
         ws.close();
