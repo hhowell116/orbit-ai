@@ -10,7 +10,7 @@ Orbit AI is a multi-tenant, team-based AI coding platform. Teams sign up, create
 
 ```
 [Browser]
-  ├── Terminal tab (xterm.js) ──WSS──→ [Broker :5000] ──→ PTY per user ──→ Claude Code
+  ├── Terminal tab (xterm.js) ──WSS──→ [Broker :5000] ──TCP──→ [pty-worker.cjs] ──→ Claude Code
   ├── Chat tab (API mode)     ──HTTP──→ [Broker :5000] ──→ Anthropic API
   └── Dashboard               ──HTTP──→ [Broker :5000] ──→ SQLite + Projects
                                             │
@@ -37,7 +37,7 @@ Users open a project and use the Terminal tab. The browser connects via WebSocke
 
 **WebSocket terminal pipeline:**
 ```
-xterm.js (browser) → WSS → Broker → node-pty (PTY per user) → Claude Code
+xterm.js (browser) → WSS → Broker → TCP → pty-worker.cjs (Node.js) → node-pty → Claude Code
 ```
 
 **Per-user isolation:**
@@ -50,7 +50,7 @@ xterm.js (browser) → WSS → Broker → node-pty (PTY per user) → Claude Cod
 
 **Session persistence:** PTY sessions survive browser disconnects. If a user closes their tab and reopens it, they reconnect to the same running PTY. The terminal state (scrollback, running processes) is preserved.
 
-**PTY implementation:** The broker uses `node-pty` for PTY spawning, with `Bun.spawn` as a fallback if node-pty is unavailable.
+**PTY implementation:** The broker spawns a **Node.js worker process** (`pty-worker.cjs`) that uses `node-pty` for the actual PTY. The broker communicates with the worker via a **TCP socket** on localhost. This two-process design is necessary because `node-pty` doesn't work under Bun (the PTY gets SIGHUP'd immediately) and Bun's stdout pipes break with long-running subprocesses. See the PTY Worker Architecture section below for details.
 
 ### API Chat Mode (Fallback)
 
@@ -163,7 +163,7 @@ The tunnel stays running permanently. On deploys, only the broker restarts — z
 | Encryption | AES-256-GCM (crypto.ts) | Token encryption at rest |
 | AI (API mode) | @anthropic-ai/sdk 0.88 | Claude chat with streaming |
 | AI (Terminal) | Claude Code CLI | Runs in per-user PTY via browser terminal |
-| PTY | node-pty (fallback: Bun.spawn) | Per-user terminal process spawning |
+| PTY | pty-worker.cjs (Node.js + node-pty) | Per-user terminal via TCP socket worker |
 | WebSocket | Built-in (Bun/Hono) | Browser terminal ↔ PTY communication |
 | Terminal UI | xterm.js | Terminal emulator in browser |
 | Frontend | React 19 + Vite 8 + Tailwind 4 | Dashboard SPA |
@@ -196,7 +196,7 @@ The tunnel stays running permanently. On deploys, only the broker restarts — z
 | name | TEXT | Team display name |
 | slug | TEXT UNIQUE | URL-safe name |
 | owner_id | TEXT FK→users | Team creator (transferable) |
-| rules | TEXT | Team-wide Claude instructions (markdown) |
+| rules | TEXT | JSON array of `{title, content}` rule blocks |
 | created_at | DATETIME | |
 
 ### team_members
@@ -419,6 +419,7 @@ Team owners can transfer ownership to another member via `POST /teams/:id/transf
 | GET | /api/connections/github/status | Check if user has GitHub connected |
 | PUT | /api/connections/:provider | Save encrypted token |
 | DELETE | /api/connections/:provider | Remove connection |
+| GET | /api/online-users | Team members with last_seen < 2 min |
 | GET | /api/activity/recent | Activity feed |
 | GET | /api/activity/stream | SSE real-time stream |
 
@@ -510,30 +511,157 @@ Tabbed page controlled by URL hash:
 The browser terminal is the core of Orbit AI's Claude Code integration. Here is the full pipeline:
 
 ```
-┌─────────────┐     WSS      ┌─────────────┐    stdin/stdout    ┌──────────────┐
-│  Browser     │ ──────────→  │   Broker     │ ────────────────→ │  PTY Process │
-│  (xterm.js)  │ ←────────── │  (WebSocket) │ ←──────────────── │  (node-pty)  │
-└─────────────┘              └─────────────┘                    └──────────────┘
-                                                                       │
-                                                                 Claude Code CLI
-                                                                 (user's subscription)
+┌─────────────┐     WSS      ┌─────────────┐     TCP      ┌──────────────┐    pty     ┌──────────┐
+│  Browser     │ ──────────→  │   Broker     │ ──────────→ │ pty-worker   │ ────────→  │  Shell   │
+│  (xterm.js)  │ ←────────── │  (Bun/Hono)  │ ←────────── │ (Node.js)    │ ←──────── │  + Claude│
+└─────────────┘              └─────────────┘              └──────────────┘           └──────────┘
 ```
 
 ### Connection lifecycle:
 1. User opens Terminal tab in a project
 2. Browser establishes WSS connection to `/ws/terminal` with JWT auth
-3. Broker spawns a PTY (node-pty, fallback to Bun.spawn) in the project directory
-4. Environment is configured with `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN` for isolation
-5. Keystrokes flow from xterm.js → WebSocket → PTY stdin
-6. PTY stdout → WebSocket → xterm.js rendering
-7. If the browser disconnects, the PTY keeps running
-8. On reconnect, the user resumes the same session (scrollback and state intact)
+3. Broker spawns `pty-worker.cjs` as a Node.js child process
+4. The worker opens a TCP server on a random port, spawns the shell via `node-pty`, and reports the port back to the broker on stdout
+5. Broker connects to the worker via TCP on localhost
+6. Environment is configured with `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN` for isolation
+7. Keystrokes flow from xterm.js → WebSocket → Broker → TCP → pty-worker → PTY stdin
+8. PTY stdout → pty-worker → TCP → Broker → WebSocket → xterm.js rendering
+9. If the browser disconnects, the PTY keeps running
+10. On reconnect, the user resumes the same session (scrollback buffer of last 500 chunks intact)
 
 ### Per-user environment variables:
 | Variable | Purpose |
 |----------|---------|
 | `CLAUDE_CONFIG_DIR` | Isolates Claude Code config per user |
 | `CLAUDE_CODE_OAUTH_TOKEN` | User's subscription auth token |
+
+### PTY Worker Architecture (pty-worker.cjs)
+
+The PTY is managed by a separate **Node.js** process (`pty-worker.cjs`) rather than running `node-pty` directly inside the Bun broker. This is necessary because:
+
+1. **node-pty under Bun fails** — the spawned PTY receives SIGHUP immediately and dies
+2. **Bun's stdout pipes break** with long-running subprocesses
+
+**How it works:**
+
+```
+Broker (Bun)                                  pty-worker.cjs (Node.js)
+─────────────                                 ────────────────────────
+Bun.spawn(["node", "pty-worker.cjs"])  ──→    Starts, spawns shell via node-pty
+                                              Opens TCP server on random port
+Reads startup JSON from stdout         ←──    Writes { port, pid } to stdout
+connect() to TCP port on 127.0.0.1    ──→    Accepts TCP connection
+{ t:"i", d:"..." }  (keystrokes)      ──→    Writes to PTY stdin
+                                       ←──    { t:"o", d:"..." }  (PTY output)
+{ t:"r", c:120, r:40 } (resize)       ──→    Resizes PTY
+```
+
+**Message protocol (newline-delimited JSON over TCP):**
+| Type | Direction | Format | Purpose |
+|------|-----------|--------|---------|
+| `i` | Broker → Worker | `{ t:"i", d:"..." }` | Keystroke input to PTY |
+| `o` | Worker → Broker | `{ t:"o", d:"..." }` | PTY output to browser |
+| `r` | Broker → Worker | `{ t:"r", c:N, r:N }` | Terminal resize |
+
+**Implementation:**
+- `packages/broker/src/pty-worker.cjs` — Node.js worker with node-pty + TCP server
+- `packages/broker/src/terminal.ts` — Session manager, spawns workers, manages TCP connections
+
+---
+
+## Online Users Tracking
+
+Online users are tracked using the `last_seen` timestamp on the `users` table, which is updated on every authenticated API request.
+
+### How it works
+
+```
+User makes any authenticated request
+  → Auth middleware updates users.last_seen = datetime('now')
+  → GET /online-users returns users with last_seen within the last 2 minutes
+  → Dashboard shows online user count in stat cards
+  → Project page shows "Who's Here" sidebar panel
+```
+
+### Implementation
+- `last_seen` column on `users` table — updated on every authenticated request
+- `GET /api/online-users` — returns team members with `last_seen > datetime('now', '-2 minutes')`
+- Dashboard stat cards show online user count with clickable expand panel
+
+---
+
+## Session Activity Logging
+
+Terminal connects and disconnects are logged to the `activity` table so the team can see who is working on what.
+
+### Events logged
+| Event | When | Detail |
+|-------|------|--------|
+| `session.created` | User opens a terminal (new session only, not reconnects) | `{ title: "Terminal" }` |
+| `session.ended` | User's terminal PTY exits (only if session was genuinely active) | `{ title: "Terminal" }` |
+| `file.edited` | File watcher detects a change | File path, auto-lock acquired |
+| `lock.acquired` | File auto-locked for a user | File path, user |
+| `lock.released` | User disconnects, locks freed | File path |
+
+### Activity Feed
+The activity feed appears in the right sidebar of the dashboard and in the project page sidebar. Events are displayed with **colored labels**:
+- **Joined** (green) — user opened a terminal session
+- **Left** (red) — user's session ended
+- **Edited** (blue) — file was edited
+- **Locked** (orange) — file was locked
+
+Real-time updates are delivered via SSE (`GET /api/activity/stream`).
+
+---
+
+## Dashboard UI Details
+
+### Clickable Stat Cards
+
+The dashboard shows stat cards at the top (Projects, Online Users, Sessions, etc.). Each card is **clickable** and expands to show a **detail panel** below with relevant information:
+- **Projects** — lists all team projects
+- **Online Users** — shows who is currently online with last-seen times
+- **Sessions** — shows active terminal sessions
+- Clicking an already-expanded card collapses it
+
+### Terminal Toolbar Layout
+
+The project terminal has a split toolbar:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  [/login][/plan][/compact][/clear][/cost][/help]  │  [Paste][Paste Token]│
+│  [Upload Image]                                    │  [Swap Model][Launch]│
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Left side:** Slash command buttons + Paste + Paste Token + Upload Image
+- **Right side:** Swap Model + Launch Claude buttons
+
+### Launch Claude Popup
+
+Opens when clicking the "Launch Claude" button. Four launch modes:
+| Mode | Description | Flag |
+|------|-------------|------|
+| Standard | Default Opus 4.6 | (none) |
+| Skip Permissions | Auto-approve all tool use | `--dangerously-skip-permissions` |
+| Plan Mode | Starts Claude then enters /plan | (enters /plan after launch) |
+| Resume Session | Continues last conversation | `--continue` |
+
+### Swap Model Popup
+
+Opens when clicking the "Swap Model" button. Three model options:
+| Model | Description |
+|-------|-------------|
+| Opus 4.6 (Recommended) | Most capable, 1M context |
+| Sonnet 4.6 | Fast, everyday coding |
+| Haiku 4.5 (Fastest) | Quick edits, simple tasks |
+
+### Team Settings Page
+
+Split into two tabs controlled by URL hash:
+- **#members** — Member list with role management (owner/admin/member), invite code generation, ownership transfer
+- **#rules** — Multiple rule blocks stored as a JSON array of `{title, content}` objects. Each block has a title and content textarea. All blocks are combined when written to CLAUDE.md. Project rules add to team rules, never replace them.
 
 ---
 
@@ -609,6 +737,11 @@ New commits on main detected
   → restart broker
   → verify tunnel is alive (restart if dead)
   → periodic tunnel health check every cycle
+
+Daily Claude Code auto-update
+  → Checks timestamp file (.claude-update-stamp)
+  → If 24+ hours since last update: npm update -g @anthropic-ai/claude-code
+  → Writes current timestamp to stamp file
 ```
 
 ---
@@ -624,7 +757,10 @@ orbit-ai/
 │   ├── broker/
 │   │   ├── src/
 │   │   │   ├── index.ts        ← All API routes + static serving
-│   │   │   ├── terminal.ts     ← WebSocket terminal + PTY management
+│   │   │   ├── terminal.ts     ← WebSocket terminal + PTY session manager
+│   │   │   ├── pty-worker.cjs  ← Node.js PTY worker (node-pty + TCP socket)
+│   │   │   ├── filewatcher.ts  ← Filesystem watcher for auto file locking
+│   │   │   ├── rules-sync.ts   ← Syncs team/project rules to CLAUDE.md on disk
 │   │   │   ├── auth.ts         ← JWT + middleware
 │   │   │   ├── crypto.ts       ← AES-256-GCM encrypt/decrypt
 │   │   │   ├── db.ts           ← SQLite schema + migrations
@@ -662,6 +798,7 @@ orbit-ai/
 ├── start.sh                    ← Start broker + tunnel
 ├── stop.sh                     ← Stop broker (--all for tunnel too)
 ├── auto-deploy.sh              ← Polls GitHub, rebuilds, restarts, health checks
+├── .claude-update-stamp        ← Timestamp for daily Claude Code updates (auto-generated)
 ├── ARCHITECTURE.md             ← This file
 ├── firebase.json               ← Firebase config (OAuth only)
 └── package.json                ← Workspace root

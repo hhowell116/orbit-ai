@@ -11,6 +11,7 @@ export NVM_DIR="$HOME/.nvm"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_FILE="$REPO_DIR/deploy.log"
 CHECK_INTERVAL=60
+CLAUDE_UPDATE_STAMP="$REPO_DIR/.claude-update-stamp"
 
 echo "$(date) - Auto-deploy started. Watching $REPO_DIR" | tee -a "$LOG_FILE"
 
@@ -72,6 +73,26 @@ while true; do
     nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
     sleep 2
     echo "$(date) - Tunnel started (PID $!)" | tee -a "$LOG_FILE"
+  fi
+
+  # Daily Claude Code auto-update — runs once every 24 hours
+  NEED_UPDATE=false
+  if [ ! -f "$CLAUDE_UPDATE_STAMP" ]; then
+    NEED_UPDATE=true
+  else
+    LAST_UPDATE=$(cat "$CLAUDE_UPDATE_STAMP" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    ELAPSED=$(( NOW - LAST_UPDATE ))
+    if [ "$ELAPSED" -ge 86400 ]; then
+      NEED_UPDATE=true
+    fi
+  fi
+
+  if [ "$NEED_UPDATE" = true ]; then
+    echo "$(date) - Running daily Claude Code update..." | tee -a "$LOG_FILE"
+    npm update -g @anthropic-ai/claude-code 2>&1 | tee -a "$LOG_FILE"
+    date +%s > "$CLAUDE_UPDATE_STAMP"
+    echo "$(date) - Claude Code update complete." | tee -a "$LOG_FILE"
   fi
 
   sleep "$CHECK_INTERVAL"
