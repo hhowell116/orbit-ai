@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
 import { OrbitalBackground } from "../components/OrbitalBackground";
@@ -24,6 +24,7 @@ interface Invite {
 export function TeamSettingsPage() {
   const { teamId } = useParams<{ teamId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, activeTeam } = useAuthStore();
   const broker = useBroker();
 
@@ -36,6 +37,9 @@ export function TeamSettingsPage() {
   const [teamRules, setTeamRules] = useState("");
   const [rulesSaving, setRulesSaving] = useState(false);
   const [rulesMsg, setRulesMsg] = useState("");
+
+  // Tab from URL hash
+  const tab = location.hash === "#rules" ? "rules" : "members";
 
   const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const isOwner = activeTeam?.role === "owner";
@@ -98,7 +102,6 @@ export function TeamSettingsPage() {
     setTransferring(true);
     try {
       await broker.transferOwnership(teamId, transferTarget);
-      // Refresh members to show updated roles
       const updated = await broker.getTeamMembers(teamId);
       setMembers(updated);
       setTransferTarget("");
@@ -121,7 +124,7 @@ export function TeamSettingsPage() {
       <OrbitalBackground />
       <div className="max-w-2xl mx-auto pt-10 px-4 pb-20 relative" style={{ zIndex: 1 }}>
         {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+        <div className="flex items-center gap-4 mb-6">
           <button onClick={() => navigate("/")} className="text-sm" style={{ color: "var(--color-text-muted)" }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
@@ -133,47 +136,33 @@ export function TeamSettingsPage() {
           </div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 rounded-lg p-1" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+          <button onClick={() => navigate(`#members`, { replace: true })}
+            className="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all"
+            style={{
+              background: tab === "members" ? "var(--color-bg-elevated)" : "transparent",
+              color: tab === "members" ? "var(--color-text-primary)" : "var(--color-text-muted)",
+              border: tab === "members" ? "1px solid var(--color-border)" : "1px solid transparent",
+            }}>
+            Members
+          </button>
+          <button onClick={() => navigate(`#rules`, { replace: true })}
+            className="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all"
+            style={{
+              background: tab === "rules" ? "var(--color-bg-elevated)" : "transparent",
+              color: tab === "rules" ? "var(--color-text-primary)" : "var(--color-text-muted)",
+              border: tab === "rules" ? "1px solid var(--color-border)" : "1px solid transparent",
+            }}>
+            Rules
+          </button>
+        </div>
+
         {loading ? (
           <div className="text-center py-12 text-sm" style={{ color: "var(--color-text-muted)" }}>Loading...</div>
-        ) : (
+        ) : tab === "members" ? (
+          /* ═══ MEMBERS TAB ═══ */
           <div className="space-y-6">
-            {/* Team Rules */}
-            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
-                    Team Rules
-                  </h2>
-                  <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
-                    Instructions Claude must follow for all projects in this team. Sent as a system prompt.
-                  </p>
-                </div>
-                {rulesMsg && (
-                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
-                )}
-              </div>
-              <textarea
-                value={teamRules}
-                onChange={(e) => setTeamRules(e.target.value)}
-                rows={10}
-                className="w-full px-3 py-2 rounded-lg text-sm font-mono focus:outline-none resize-y"
-                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.5" }}
-                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
-                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
-                placeholder={`# Team Rules for Claude\n\n## Token Efficiency\n- Be concise. Avoid unnecessary explanations.\n- Only read files that are directly relevant to the task.\n- Do not repeat back large blocks of code — reference by filename and line numbers.\n- Summarize changes rather than showing full diffs.\n\n## Code Standards\n- Follow existing code style and conventions.\n- Do not add comments unless the logic is non-obvious.\n- Do not refactor code that isn't related to the current task.\n\n## Behavior\n- Ask clarifying questions before making large changes.\n- Always explain what you changed and why in 1-2 sentences.`}
-                disabled={!isOwnerOrAdmin}
-              />
-              {isOwnerOrAdmin && (
-                <div className="flex justify-end mt-2">
-                  <button onClick={handleSaveRules} disabled={rulesSaving}
-                    className="text-xs px-4 py-1.5 rounded-lg font-medium"
-                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
-                    {rulesSaving ? "Saving..." : "Save Rules"}
-                  </button>
-                </div>
-              )}
-            </div>
-
             {/* Members */}
             <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
               <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
@@ -186,12 +175,9 @@ export function TeamSettingsPage() {
                     <span className="text-sm flex-1" style={{ color: "var(--color-text-primary)" }}>{m.display_name}</span>
                     <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>@{m.username}</span>
                     {isOwner && m.id !== user?.id ? (
-                      <select
-                        value={m.role}
-                        onChange={(e) => handleChangeRole(m.id, e.target.value)}
+                      <select value={m.role} onChange={(e) => handleChangeRole(m.id, e.target.value)}
                         className="text-xs px-2 py-1 rounded focus:outline-none"
-                        style={{ background: "var(--color-bg-base)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
-                      >
+                        style={{ background: "var(--color-bg-base)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}>
                         <option value="member">member</option>
                         <option value="admin">admin</option>
                         <option value="owner">owner</option>
@@ -251,6 +237,7 @@ export function TeamSettingsPage() {
                 )}
               </div>
             )}
+
             {/* Transfer Ownership */}
             {isOwner && members.filter((m) => m.id !== user?.id).length > 0 && (
               <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid rgba(224, 108, 117, 0.2)" }}>
@@ -261,9 +248,7 @@ export function TeamSettingsPage() {
                   Transfer team ownership to another member. You will become an admin.
                 </p>
                 <div className="flex gap-2">
-                  <select
-                    value={transferTarget}
-                    onChange={(e) => setTransferTarget(e.target.value)}
+                  <select value={transferTarget} onChange={(e) => setTransferTarget(e.target.value)}
                     className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
                     style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}>
                     <option value="">Select a member...</option>
@@ -282,6 +267,64 @@ export function TeamSettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        ) : (
+          /* ═══ RULES TAB ═══ */
+          <div className="space-y-6">
+            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                    Team Rules
+                  </h2>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+                    Instructions Claude must follow for all projects. Sent as a system prompt with prompt caching.
+                  </p>
+                </div>
+                {rulesMsg && (
+                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
+                )}
+              </div>
+              <textarea
+                value={teamRules}
+                onChange={(e) => setTeamRules(e.target.value)}
+                rows={20}
+                className="w-full px-3 py-2 rounded-lg text-sm font-mono focus:outline-none resize-y"
+                style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)", lineHeight: "1.5", minHeight: "400px" }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                placeholder={`# Team Rules for Claude
+
+## Token Efficiency
+- Be concise. Avoid unnecessary explanations.
+- Only read files that are directly relevant to the task.
+- Do not repeat back large blocks of code — reference by filename and line numbers.
+- Summarize changes rather than showing full diffs.
+
+## Code Standards
+- Follow existing code style and conventions.
+- Do not add comments unless the logic is non-obvious.
+- Do not refactor code that isn't related to the current task.
+
+## Behavior
+- Ask clarifying questions before making large changes.
+- Always explain what you changed and why in 1-2 sentences.`}
+                disabled={!isOwnerOrAdmin}
+              />
+              {isOwnerOrAdmin && (
+                <div className="flex justify-end mt-3">
+                  <button onClick={handleSaveRules} disabled={rulesSaving}
+                    className="text-xs px-4 py-2 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    {rulesSaving ? "Saving..." : "Save Rules"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-center" style={{ color: "var(--color-text-muted)" }}>
+              These rules apply to all projects in this team. Individual projects can add their own rules in the project sidebar.
+            </p>
           </div>
         )}
       </div>
