@@ -379,19 +379,53 @@ Team owners can transfer ownership to another member via `POST /teams/:id/transf
 
 | Route | Page | Auth | Description |
 |-------|------|------|-------------|
-| /login | LoginPage | Public | Google sign-in |
+| /login | LoginPage | Public | Google sign-in + username/password login |
 | /signup | SignupPage | Public | Create account + Google sign-up |
 | /download | DownloadPage | Public | Optional desktop app download (platform picker) |
 | /teams | TeamSelectionPage | Token | Create, join, or select team |
 | /teams/:id/settings | TeamSettingsPage | Token | Team rules, members, invites, ownership transfer |
-| /connections | ConnectionsPage | Token+Team | Personal API keys (Claude, GitHub) |
-| / | ProjectsPage | Token+Team | Dashboard with hamburger sidebar, activity feed, projects |
+| /connections | ConnectionsPage | Token+Team | Claude (setup token or API key) + GitHub token, side-by-side layout |
+| / | ProjectsPage | Token+Team | 3-column dashboard: left nav, center projects, right activity feed |
 | /project/:id | ProjectPage | Token+Team | Terminal tab + Chat tab, sidebar (rules, git, locks, activity, users) |
 
+### Dashboard Layout (ProjectsPage)
+
+3-column layout with symmetric sidebars:
+
+```
+┌──────────────┬────────────────────────────┬──────────────┐
+│  Left Nav    │     Center Content         │  Activity    │
+│  (w-60)      │     (max 900px, centered)  │  Feed (w-60) │
+├──────────────┼────────────────────────────┼──────────────┤
+│ + New Project│  Stats: Projects, Users,   │  user1       │
+│              │  Sessions, AI Thinking     │  edited file │
+│ Manage Team  │                            │              │
+│ Connections  │  Active AI Sessions        │  user2       │
+│ Switch Team  │                            │  created     │
+│              │  Project cards (2-col grid) │  session     │
+│ ──────────── │                            │              │
+│ Team: name   │                            │              │
+└──────────────┴────────────────────────────┴──────────────┘
+```
+
+### Project Page Layout
+
+```
+┌──────────────────────────────────┬──────────────────┐
+│  [Terminal] [Chat]  tabs         │  Who's Here      │
+├──────────────────────────────────│  Project Rules   │
+│  Terminal toolbar:               │  File Locks      │
+│  [claude] [Swap Model] [/login]  │  Git             │
+│  [/plan] [/compact] [Paste] etc  │  Recent Activity │
+│                                  │                  │
+│  xterm.js terminal               │                  │
+│  (WebSocket → PTY on VM)         │                  │
+└──────────────────────────────────┴──────────────────┘
+```
+
 ### Key Components
-- **Terminal tab** — xterm.js connected via WebSocket to per-user PTY running Claude Code
+- **WebTerminal** — xterm.js connected via WebSocket to per-user PTY, Claude Code quick buttons (claude, Swap Model, Skip Perms, /login, /plan, /compact, /clear, /cost, /help), Paste, Paste Token, Upload Image
 - **Chat tab** — API-mode chat with Claude (requires API key in Connections)
-- **ChatWindow** — Message input, streaming display, connection warning
 - **OrbitalBackground** — Animated starfield with twinkling stars, nebula gradients, shooting stars
 - **CommandPalette** — Ctrl+K project search
 - **Hamburger Sidebar** — Manage Team, Connections, Switch Team, Sign Out
