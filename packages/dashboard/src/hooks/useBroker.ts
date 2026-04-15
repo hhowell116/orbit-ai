@@ -14,6 +14,12 @@ async function brokerFetch(path: string, options: RequestInit = {}) {
     },
   });
   if (!res.ok) {
+    // Auto-logout on expired/invalid token — redirect to login instead of showing error
+    if (res.status === 401) {
+      useAuthStore.getState().logout();
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
   }
