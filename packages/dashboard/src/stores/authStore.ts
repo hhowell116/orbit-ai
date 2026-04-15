@@ -45,14 +45,29 @@ function loadFromStorage(): { token: string; user: User; teams: Team[]; activeTe
   }
 }
 
-// Hydrate initial state from sessionStorage
+// Check if a JWT is expired by decoding the payload
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    // Expire 60s early to avoid edge-case 401s
+    return payload.exp * 1000 < Date.now() - 60_000;
+  } catch {
+    return true; // Malformed token — treat as expired
+  }
+}
+
+// Hydrate initial state from sessionStorage, clear if expired
 const stored = loadFromStorage();
+if (stored?.token && isTokenExpired(stored.token)) {
+  sessionStorage.removeItem(STORAGE_KEY);
+}
+const validStored = stored?.token && !isTokenExpired(stored.token) ? stored : null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: stored?.token || null,
-  user: stored?.user || null,
-  teams: stored?.teams || [],
-  activeTeam: stored?.activeTeam || null,
+  token: validStored?.token || null,
+  user: validStored?.user || null,
+  teams: validStored?.teams || [],
+  activeTeam: validStored?.activeTeam || null,
 
   login: (token, user, teams) => {
     const state = { token, user, teams, activeTeam: null as Team | null };
