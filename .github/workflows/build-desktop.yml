@@ -1,0 +1,170 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS (Apple Silicon)
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            label: macOS (Intel)
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: Linux
+
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Tauri CLI
+        working-directory: packages/desktop
+        run: npm install
+
+      - name: Generate app icons from SVG
+        working-directory: packages/desktop
+        run: npx tauri icon icon.svg
+
+      - name: Build Tauri app
+        working-directory: packages/desktop
+        run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Rename exe (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          cp "packages/desktop/src-tauri/target/${{ matrix.target }}/release/orbit-ai.exe" "packages/desktop/src-tauri/target/${{ matrix.target }}/release/OrbitAI.exe" || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-ai-${{ matrix.target }}
+          path: |
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/OrbitAI.exe
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate updater manifest (latest.json)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          NOTES="Orbit AI Desktop App ${GITHUB_REF_NAME}"
+
+          # Find signature files
+          WIN_SIG=$(find artifacts -name "*.nsis.zip.sig" | head -1)
+          MAC_ARM_SIG=$(find artifacts/orbit-ai-aarch64-apple-darwin -name "*.app.tar.gz.sig" | head -1)
+          MAC_INTEL_SIG=$(find artifacts/orbit-ai-x86_64-apple-darwin -name "*.app.tar.gz.sig" | head -1)
+          LINUX_SIG=$(find artifacts -name "*.AppImage.tar.gz.sig" | head -1)
+
+          # Read signatures
+          WIN_SIG_CONTENT=""
+          MAC_ARM_SIG_CONTENT=""
+          MAC_INTEL_SIG_CONTENT=""
+          LINUX_SIG_CONTENT=""
+          [ -f "$WIN_SIG" ] && WIN_SIG_CONTENT=$(cat "$WIN_SIG")
+          [ -f "$MAC_ARM_SIG" ] && MAC_ARM_SIG_CONTENT=$(cat "$MAC_ARM_SIG")
+          [ -f "$MAC_INTEL_SIG" ] && MAC_INTEL_SIG_CONTENT=$(cat "$MAC_INTEL_SIG")
+          [ -f "$LINUX_SIG" ] && LINUX_SIG_CONTENT=$(cat "$LINUX_SIG")
+
+          BASE_URL="https://github.com/hhowell116/orbit-ai/releases/download/${GITHUB_REF_NAME}"
+
+          cat > latest.json << MANIFEST
+          {
+            "version": "${VERSION}",
+            "notes": "${NOTES}",
+            "pub_date": "${DATE}",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "${WIN_SIG_CONTENT}",
+                "url": "${BASE_URL}/Orbit.AI_${VERSION}_x64-setup.nsis.zip"
+              },
+              "darwin-aarch64": {
+                "signature": "${MAC_ARM_SIG_CONTENT}",
+                "url": "${BASE_URL}/Orbit.AI.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "${MAC_INTEL_SIG_CONTENT}",
+                "url": "${BASE_URL}/Orbit.AI.app.tar.gz"
+              },
+              "linux-x86_64": {
+                "signature": "${LINUX_SIG_CONTENT}",
+                "url": "${BASE_URL}/orbit-ai_${VERSION}_amd64.AppImage.tar.gz"
+              }
+            }
+          }
+          MANIFEST
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Orbit AI ${{ github.ref_name }}
+          body: |
+            ## Orbit AI Desktop App
+
+            Download for your platform:
+            - **Windows**: `OrbitAI.exe` — just download and run, no install needed
+            - **macOS**: `.dmg`
+            - **Linux**: `.AppImage` or `.deb`
+
+            The app includes:
+            - Embedded terminal for running Claude Code with your subscription
+            - Full Orbit AI dashboard (team features, git, connections)
+            - WebSocket bridge for browser integration
+            - Auto-updates for future releases
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/OrbitAI.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            latest.json

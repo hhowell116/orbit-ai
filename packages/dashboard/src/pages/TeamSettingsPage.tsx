@@ -1,0 +1,389 @@
+import { useEffect, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useAuthStore } from "../stores/authStore";
+import { useBroker } from "../hooks/useBroker";
+import { OrbitalBackground } from "../components/OrbitalBackground";
+
+interface Member {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  joined_at: string;
+}
+
+interface Invite {
+  id: number;
+  code: string;
+  use_count: number;
+  max_uses: number | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export function TeamSettingsPage() {
+  const { teamId } = useParams<{ teamId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, activeTeam } = useAuthStore();
+  const broker = useBroker();
+
+  const [members, setMembers] = useState<Member[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [transferTarget, setTransferTarget] = useState("");
+  const [transferring, setTransferring] = useState(false);
+  const [ruleBlocks, setRuleBlocks] = useState<{ title: string; content: string }[]>([]);
+  const [rulesSaving, setRulesSaving] = useState(false);
+  const [rulesMsg, setRulesMsg] = useState("");
+
+  // Tab from URL hash
+  const tab = location.hash === "#rules" ? "rules" : "members";
+
+  const isOwnerOrAdmin = activeTeam?.role === "owner" || activeTeam?.role === "admin";
+  const isOwner = activeTeam?.role === "owner";
+
+  useEffect(() => {
+    if (!teamId) return;
+    Promise.all([
+      broker.getTeamMembers(teamId).then(setMembers),
+      broker.getTeamRules(teamId).then((d: any) => {
+        const raw = d.rules || "";
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) { setRuleBlocks(parsed); return; }
+        } catch {}
+        // Legacy: single string → convert to one block
+        if (raw.trim()) {
+          setRuleBlocks([{ title: "General", content: raw }]);
+        }
+      }),
+      isOwnerOrAdmin ? broker.getInvites(teamId).then(setInvites) : Promise.resolve(),
+    ])
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [teamId]);
+
+  async function handleSaveRules() {
+    if (!teamId) return;
+    setRulesSaving(true);
+    setRulesMsg("");
+    try {
+      await broker.setTeamRules(teamId, JSON.stringify(ruleBlocks));
+      setRulesMsg("Saved!");
+      setTimeout(() => setRulesMsg(""), 3000);
+    } catch (err: any) {
+      setRulesMsg(err.message || "Failed to save");
+    } finally {
+      setRulesSaving(false);
+    }
+  }
+
+  function addRuleBlock() {
+    setRuleBlocks((prev) => [...prev, { title: "", content: "" }]);
+  }
+
+  function updateRuleBlock(index: number, field: "title" | "content", value: string) {
+    setRuleBlocks((prev) => prev.map((b, i) => i === index ? { ...b, [field]: value } : b));
+  }
+
+  function removeRuleBlock(index: number) {
+    if (!confirm("Remove this rule block?")) return;
+    setRuleBlocks((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleGenerateInvite() {
+    if (!teamId) return;
+    const invite = await broker.createInvite(teamId);
+    setInvites((prev) => [invite, ...prev]);
+  }
+
+  async function handleRevokeInvite(inviteId: number) {
+    if (!teamId) return;
+    await broker.revokeInvite(teamId, inviteId);
+    setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!teamId || !confirm("Remove this member from the team?")) return;
+    await broker.removeTeamMember(teamId, userId);
+    setMembers((prev) => prev.filter((m) => m.id !== userId));
+  }
+
+  async function handleChangeRole(userId: string, role: string) {
+    if (!teamId) return;
+    await broker.updateMemberRole(teamId, userId, role);
+    setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role } : m)));
+  }
+
+  async function handleTransferOwnership() {
+    if (!teamId || !transferTarget) return;
+    const target = members.find((m) => m.id === transferTarget);
+    if (!target) return;
+    if (!confirm(`Transfer ownership to ${target.display_name}? You will become an admin.`)) return;
+    setTransferring(true);
+    try {
+      await broker.transferOwnership(teamId, transferTarget);
+      const updated = await broker.getTeamMembers(teamId);
+      setMembers(updated);
+      setTransferTarget("");
+      alert("Ownership transferred successfully. You are now an admin.");
+    } catch (err: any) {
+      alert(err.message || "Failed to transfer ownership");
+    } finally {
+      setTransferring(false);
+    }
+  }
+
+  function copyCode(code: string) {
+    navigator.clipboard.writeText(code);
+    setCopied(code);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  return (
+    <div className="min-h-screen relative" style={{ background: "var(--color-bg-base)" }}>
+      <OrbitalBackground />
+      <div className={`mx-auto pt-10 px-4 pb-20 relative ${tab === "rules" ? "max-w-5xl" : "max-w-2xl"}`} style={{ zIndex: 1 }}>
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-6">
+          <button onClick={() => navigate("/")} className="text-sm" style={{ color: "var(--color-text-muted)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+            &larr; Dashboard
+          </button>
+          <div className="pl-4" style={{ borderLeft: "1px solid var(--color-border)" }}>
+            <h1 className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name}</h1>
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>Team Settings</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 rounded-lg p-1" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+          <button onClick={() => navigate(`#members`, { replace: true })}
+            className="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all"
+            style={{
+              background: tab === "members" ? "var(--color-bg-elevated)" : "transparent",
+              color: tab === "members" ? "var(--color-text-primary)" : "var(--color-text-muted)",
+              border: tab === "members" ? "1px solid var(--color-border)" : "1px solid transparent",
+            }}>
+            Members
+          </button>
+          <button onClick={() => navigate(`#rules`, { replace: true })}
+            className="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all"
+            style={{
+              background: tab === "rules" ? "var(--color-bg-elevated)" : "transparent",
+              color: tab === "rules" ? "var(--color-text-primary)" : "var(--color-text-muted)",
+              border: tab === "rules" ? "1px solid var(--color-border)" : "1px solid transparent",
+            }}>
+            Rules
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12 text-sm" style={{ color: "var(--color-text-muted)" }}>Loading...</div>
+        ) : tab === "members" ? (
+          /* ═══ MEMBERS TAB ═══ */
+          <div className="space-y-6">
+            {/* Members */}
+            <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+              <h2 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: "var(--color-text-muted)" }}>
+                Members ({members.length})
+              </h2>
+              <div className="space-y-2">
+                {members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: "var(--color-success)" }} />
+                    <span className="text-sm flex-1" style={{ color: "var(--color-text-primary)" }}>{m.display_name}</span>
+                    <span className="text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>@{m.username}</span>
+                    {isOwner && m.id !== user?.id ? (
+                      <select value={m.role} onChange={(e) => handleChangeRole(m.id, e.target.value)}
+                        className="text-xs px-2 py-1 rounded focus:outline-none"
+                        style={{ background: "var(--color-bg-base)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}>
+                        <option value="member">member</option>
+                        <option value="admin">admin</option>
+                        <option value="owner">owner</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full" style={{
+                        background: m.role === "owner" ? "var(--color-primary-muted)" : "var(--color-bg-hover)",
+                        color: m.role === "owner" ? "var(--color-primary)" : "var(--color-text-muted)",
+                      }}>{m.role}</span>
+                    )}
+                    {isOwnerOrAdmin && m.id !== user?.id && m.role !== "owner" && (
+                      <button onClick={() => handleRemoveMember(m.id)} className="text-xs px-1" style={{ color: "var(--color-text-muted)" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                        x
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Invite Codes */}
+            {isOwnerOrAdmin && (
+              <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                    Invite Codes
+                  </h2>
+                  <button onClick={handleGenerateInvite}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    + Generate Code
+                  </button>
+                </div>
+                {invites.length === 0 ? (
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>No invite codes yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {invites.map((inv) => (
+                      <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ background: "var(--color-bg-elevated)" }}>
+                        <span className="font-mono text-sm tracking-wider flex-1" style={{ color: "var(--color-primary)" }}>{inv.code}</span>
+                        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                          {inv.use_count} uses{inv.max_uses ? ` / ${inv.max_uses}` : ""}
+                        </span>
+                        <button onClick={() => copyCode(inv.code)} className="text-xs px-2 py-1 rounded" style={{ background: "var(--color-bg-hover)", color: "var(--color-text-secondary)" }}>
+                          {copied === inv.code ? "Copied!" : "Copy"}
+                        </button>
+                        <button onClick={() => handleRevokeInvite(inv.id)} className="text-xs px-1" style={{ color: "var(--color-text-muted)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-error)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Transfer Ownership */}
+            {isOwner && members.filter((m) => m.id !== user?.id).length > 0 && (
+              <div className="rounded-lg p-5" style={{ background: "var(--color-bg-surface)", border: "1px solid rgba(224, 108, 117, 0.2)" }}>
+                <h2 className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: "var(--color-error)" }}>
+                  Transfer Ownership
+                </h2>
+                <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>
+                  Transfer team ownership to another member. You will become an admin.
+                </p>
+                <div className="flex gap-2">
+                  <select value={transferTarget} onChange={(e) => setTransferTarget(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}>
+                    <option value="">Select a member...</option>
+                    {members.filter((m) => m.id !== user?.id).map((m) => (
+                      <option key={m.id} value={m.id}>{m.display_name} (@{m.username})</option>
+                    ))}
+                  </select>
+                  <button onClick={handleTransferOwnership} disabled={transferring || !transferTarget}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{
+                      background: transferring || !transferTarget ? "var(--color-bg-hover)" : "var(--color-error)",
+                      color: transferring || !transferTarget ? "var(--color-text-muted)" : "#fff",
+                    }}>
+                    {transferring ? "Transferring..." : "Transfer"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ═══ RULES TAB ═══ */
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>Team Rules</h2>
+                <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+                  All rule blocks are combined and sent to Claude as a system prompt.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {rulesMsg && (
+                  <span className="text-xs" style={{ color: rulesMsg === "Saved!" ? "var(--color-success)" : "var(--color-error)" }}>{rulesMsg}</span>
+                )}
+                {isOwnerOrAdmin && (
+                  <>
+                    <button onClick={addRuleBlock}
+                      className="text-xs px-3 py-2 rounded-lg font-medium transition-colors"
+                      style={{ background: "var(--color-bg-elevated)", color: "var(--color-text-secondary)", border: "1px solid var(--color-border)" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.color = "var(--color-primary)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-text-secondary)"; }}>
+                      + Add Rule Block
+                    </button>
+                    <button onClick={handleSaveRules} disabled={rulesSaving}
+                      className="text-xs px-4 py-2 rounded-lg font-medium"
+                      style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                      {rulesSaving ? "Saving..." : "Save All"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Rule blocks */}
+            {ruleBlocks.length === 0 ? (
+              <div className="rounded-lg p-8 text-center" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                <p className="text-sm mb-2" style={{ color: "var(--color-text-secondary)" }}>No rules yet</p>
+                <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>
+                  Add rule blocks to give Claude instructions for your team's projects.
+                </p>
+                {isOwnerOrAdmin && (
+                  <button onClick={addRuleBlock}
+                    className="text-xs px-4 py-2 rounded-lg font-medium"
+                    style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                    + Add First Rule Block
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {ruleBlocks.map((block, i) => (
+                  <div key={i} className="rounded-lg overflow-hidden" style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}>
+                    {/* Block header */}
+                    <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-bg-elevated)" }}>
+                      <input
+                        type="text"
+                        value={block.title}
+                        onChange={(e) => updateRuleBlock(i, "title", e.target.value)}
+                        placeholder="Rule name (e.g. Code Standards, Security, Testing...)"
+                        className="flex-1 text-sm font-medium focus:outline-none"
+                        style={{ background: "transparent", color: "var(--color-text-primary)", border: "none" }}
+                        disabled={!isOwnerOrAdmin}
+                      />
+                      {isOwnerOrAdmin && (
+                        <button onClick={() => removeRuleBlock(i)} className="text-xs px-1.5 py-0.5 rounded transition-colors"
+                          style={{ color: "var(--color-text-muted)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-error)"; e.currentTarget.style.background = "var(--color-error-muted)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "transparent"; }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    {/* Block content */}
+                    <textarea
+                      value={block.content}
+                      onChange={(e) => updateRuleBlock(i, "content", e.target.value)}
+                      className="w-full px-4 py-3 text-sm font-mono focus:outline-none resize-y"
+                      style={{ background: "transparent", color: "var(--color-text-primary)", border: "none", lineHeight: "1.6", minHeight: "150px" }}
+                      placeholder="Enter rules for Claude..."
+                      disabled={!isOwnerOrAdmin}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-xs text-center" style={{ color: "var(--color-text-muted)" }}>
+              These rules apply to all projects in this team. Individual projects can add additional rules in the project sidebar — project rules are combined with team rules, not replaced.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

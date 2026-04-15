@@ -1,0 +1,17 @@
+{
+  "name": "ai-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "IT Team AI Coding Dashboard — centralized Claude-powered coding platform",
+  "type": "module",
+  "workspaces": [
+    "packages/broker",
+    "packages/dashboard",
+    "packages/opencode-plugin"
+  ],
+  "scripts": {
+    "dev:broker": "npm -w packages/broker run dev",
+    "dev:dashboard": "npm -w packages/dashboard run dev",
+    "dev": "npm run dev:broker & npm run dev:dashboard"
+  }
+}

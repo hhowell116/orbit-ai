@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Orbit AI</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: #0d1117; font-family: system-ui, sans-serif; }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    #web-frame {
+      flex: 1;
+      border: none;
+      width: 100%;
+      min-height: 0;
+    }
+
+    #divider {
+      height: 4px;
+      background: #1c2333;
+      cursor: row-resize;
+      flex-shrink: 0;
+      position: relative;
+    }
+    #divider:hover, #divider.dragging {
+      background: #fab283;
+    }
+
+    #terminal-container {
+      height: 280px;
+      min-height: 100px;
+      flex-shrink: 0;
+      position: relative;
+      background: #0d1117;
+    }
+
+    #terminal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      background: #151b23;
+      border-top: 1px solid #2a3140;
+      border-bottom: 1px solid #2a3140;
+    }
+
+    #terminal-header span {
+      color: #8b949e;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .term-btn {
+      background: none;
+      border: 1px solid #2a3140;
+      color: #8b949e;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .term-btn:hover {
+      border-color: #fab283;
+      color: #fab283;
+    }
+
+    #terminal {
+      height: calc(100% - 32px);
+      padding: 4px;
+    }
+
+    /* Hide terminal when collapsed */
+    #terminal-container.collapsed {
+      height: 32px !important;
+      min-height: 32px;
+    }
+    #terminal-container.collapsed #terminal {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <iframe id="web-frame" src="https://orbitai.work"></iframe>
+    <div id="divider"></div>
+    <div id="terminal-container">
+      <div id="terminal-header">
+        <span>Terminal — Claude Code</span>
+        <div style="display: flex; gap: 6px;">
+          <button class="term-btn" id="btn-claude" title="Launch Claude Code">claude</button>
+          <button class="term-btn" id="btn-collapse" title="Toggle terminal">_</button>
+        </div>
+      </div>
+      <div id="terminal"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
+    import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/+esm';
+    import { WebLinksAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11/+esm';
+
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+
+    // Initialize xterm.js
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+      theme: {
+        background: '#0d1117',
+        foreground: '#e6edf3',
+        cursor: '#fab283',
+        cursorAccent: '#0d1117',
+        selectionBackground: 'rgba(250, 178, 131, 0.2)',
+        black: '#0d1117',
+        red: '#e06c75',
+        green: '#7fd88f',
+        yellow: '#f5a742',
+        blue: '#5c9cf5',
+        magenta: '#9d7cd8',
+        cyan: '#56d4dd',
+        white: '#e6edf3',
+        brightBlack: '#5a6370',
+        brightRed: '#e06c75',
+        brightGreen: '#7fd88f',
+        brightYellow: '#fab283',
+        brightBlue: '#79b0f7',
+        brightMagenta: '#b294e0',
+        brightCyan: '#56d4dd',
+        brightWhite: '#ffffff',
+      },
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
+
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+
+    // Send keystrokes to PTY
+    term.onData((data) => {
+      invoke('pty_write', { data });
+    });
+
+    // Receive PTY output
+    listen('pty-output', (event) => {
+      term.write(event.payload);
+    });
+
+    // Resize handling
+    const ro = new ResizeObserver(() => {
+      fitAddon.fit();
+      invoke('pty_resize', { width: term.cols, height: term.rows });
+    });
+    ro.observe(document.getElementById('terminal'));
+
+    // Claude Code button
+    document.getElementById('btn-claude').addEventListener('click', () => {
+      invoke('pty_write', { data: 'claude\r' });
+    });
+
+    // Collapse/expand terminal
+    const container = document.getElementById('terminal-container');
+    const collapseBtn = document.getElementById('btn-collapse');
+    collapseBtn.addEventListener('click', () => {
+      container.classList.toggle('collapsed');
+      collapseBtn.textContent = container.classList.contains('collapsed') ? '□' : '_';
+      if (!container.classList.contains('collapsed')) {
+        setTimeout(() => fitAddon.fit(), 50);
+      }
+    });
+
+    // Draggable divider
+    const divider = document.getElementById('divider');
+    let isDragging = false;
+
+    divider.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      divider.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const appHeight = document.getElementById('app').offsetHeight;
+      const newTermHeight = appHeight - e.clientY - 4;
+      const clamped = Math.max(100, Math.min(newTermHeight, appHeight - 200));
+      container.style.height = clamped + 'px';
+      container.classList.remove('collapsed');
+      collapseBtn.textContent = '_';
+      fitAddon.fit();
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      divider.classList.remove('dragging');
+    });
+
+    // Welcome message
+    term.writeln('\x1b[38;2;250;178;131m  Orbit AI Terminal\x1b[0m');
+    term.writeln('\x1b[38;2;139;148;158m  Type "claude" to start Claude Code, or use any shell command.\x1b[0m');
+    term.writeln('');
+  </script>
+</body>
+</html>
