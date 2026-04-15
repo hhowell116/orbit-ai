@@ -295,6 +295,53 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     { label: "Resume Session", desc: "Continue your last conversation where you left off", cmd: "claude --continue --model claude-opus-4-6", icon: "↩" },
   ];
 
+  async function handleLaunchClaude(opt: typeof launchOptions[number]) {
+    setShowLaunchPicker(false);
+
+    // Fetch the user's stored Claude token and inject it into the shell env
+    // so Claude Code is automatically authenticated — no /login needed
+    try {
+      const authToken = useAuthStore.getState().token;
+      const res = await fetch("/api/connections/claude/token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Export token then immediately clear so it never shows on screen
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "input",
+            data: `export CLAUDE_CODE_OAUTH_TOKEN="${data.token}" && clear\r`,
+          }));
+        }
+        // Wait for the export+clear to finish before launching
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } catch {
+      // No token or fetch failed — continue without it, user can /login manually
+    }
+
+    // Clear terminal before launching (in case token fetch was skipped)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "input", data: "clear\r" }));
+    }
+    setTimeout(() => {
+      sendCommand(opt.cmd);
+      // Force resize after Claude starts to fix TUI rendering
+      setTimeout(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN && fitAddonRef.current && termInstance.current) {
+          fitAddonRef.current.fit();
+          wsRef.current.send(JSON.stringify({
+            type: "resize",
+            cols: termInstance.current.cols,
+            rows: termInstance.current.rows,
+          }));
+        }
+      }, 1500);
+      if (opt.postCmd) setTimeout(() => sendCommand(opt.postCmd!), 3000);
+    }, 300);
+  }
+
   const slashCommands = [
     { label: "/plan", cmd: "/plan", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", color: "var(--color-secondary)" },
@@ -348,28 +395,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
             <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>Choose how to start your Claude Code session</p>
             <div className="space-y-2">
               {launchOptions.map((opt) => (
-                <button key={opt.label} onClick={() => {
-                  // Clear terminal before launching to prevent overlap
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: "input", data: "clear\r" }));
-                  }
-                  setTimeout(() => {
-                    sendCommand(opt.cmd);
-                    // Force resize after Claude starts to fix TUI rendering
-                    setTimeout(() => {
-                      if (wsRef.current?.readyState === WebSocket.OPEN && fitAddonRef.current && termInstance.current) {
-                        fitAddonRef.current.fit();
-                        wsRef.current.send(JSON.stringify({
-                          type: "resize",
-                          cols: termInstance.current.cols,
-                          rows: termInstance.current.rows,
-                        }));
-                      }
-                    }, 1500);
-                    if (opt.postCmd) setTimeout(() => sendCommand(opt.postCmd!), 3000);
-                  }, 300);
-                  setShowLaunchPicker(false);
-                }}
+                <button key={opt.label} onClick={() => handleLaunchClaude(opt)}
                   className="w-full text-left p-4 rounded-lg transition-all"
                   style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-hover)"; }}
