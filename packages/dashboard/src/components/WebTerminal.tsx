@@ -18,6 +18,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const [errorMsg, setErrorMsg] = useState("");
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showLaunchPicker, setShowLaunchPicker] = useState(false);
+  const [loginStatus, setLoginStatus] = useState<"" | "loading" | "sending" | "sent" | "no-token" | "error">("");
   const token = useAuthStore((s) => s.token);
   const reconnectTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -196,6 +197,44 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     termInstance.current?.focus();
   }
 
+  async function handleAutoLogin() {
+    setLoginStatus("loading");
+    try {
+      const authToken = useAuthStore.getState().token;
+      const res = await fetch("/api/connections/claude/token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) {
+        if (res.status === 404) {
+          setLoginStatus("no-token");
+          setTimeout(() => setLoginStatus(""), 5000);
+          return;
+        }
+        throw new Error("Failed to fetch token");
+      }
+      const data = await res.json();
+      const claudeToken: string = data.token;
+
+      // Send /login command to Claude Code
+      setLoginStatus("sending");
+      sendCommand("/login");
+
+      // Wait for Claude Code to show the token prompt, then send the token
+      // directly through the WebSocket — bypasses clipboard entirely
+      setTimeout(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "input", data: claudeToken + "\r" }));
+        }
+        setLoginStatus("sent");
+        setTimeout(() => setLoginStatus(""), 3000);
+        termInstance.current?.focus();
+      }, 1500);
+    } catch {
+      setLoginStatus("error");
+      setTimeout(() => setLoginStatus(""), 5000);
+    }
+  }
+
   async function handleImageUpload(file: File) {
     if (!file.type.startsWith("image/")) return;
     // Upload image to the project directory on the VM via the broker
@@ -257,7 +296,6 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   ];
 
   const slashCommands = [
-    { label: "/login", cmd: "/login", color: "var(--color-success)" },
     { label: "/plan", cmd: "/plan", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", color: "var(--color-secondary)" },
     { label: "/clear", cmd: "/clear", color: "var(--color-text-secondary)" },
@@ -380,8 +418,32 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
 
         {/* Toolbar: slash commands left, actions right */}
         <div className="flex items-center justify-between px-3 pb-2">
-          {/* Left: slash commands + paste/upload */}
+          {/* Left: auto-login + slash commands + paste/upload */}
           <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Auto Login button — fetches stored token and pastes it automatically */}
+            <button onClick={handleAutoLogin}
+              disabled={loginStatus === "loading" || loginStatus === "sending"}
+              title="Auto-login to Claude using your saved token from Connections"
+              className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
+              style={{
+                background: loginStatus === "sent" ? "var(--color-success-muted)"
+                  : loginStatus === "no-token" || loginStatus === "error" ? "var(--color-error-muted)"
+                  : "var(--color-bg-elevated)",
+                color: loginStatus === "sent" ? "var(--color-success)"
+                  : loginStatus === "no-token" || loginStatus === "error" ? "var(--color-error)"
+                  : "var(--color-success)",
+                border: `1px solid ${loginStatus === "sent" ? "var(--color-success)" : loginStatus === "no-token" || loginStatus === "error" ? "var(--color-error)" : "var(--color-border)"}`,
+                opacity: loginStatus === "loading" || loginStatus === "sending" ? 0.7 : 1,
+              }}
+              onMouseEnter={(e) => { if (!loginStatus) { e.currentTarget.style.borderColor = "var(--color-success)"; e.currentTarget.style.background = "var(--color-bg-hover)"; } }}
+              onMouseLeave={(e) => { if (!loginStatus) { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; } }}>
+              {loginStatus === "loading" ? "Fetching token..."
+                : loginStatus === "sending" ? "Logging in..."
+                : loginStatus === "sent" ? "Logged in!"
+                : loginStatus === "no-token" ? "No token"
+                : loginStatus === "error" ? "Failed"
+                : "/login"}
+            </button>
             {slashCommands.map((c) => (
               <button key={c.cmd} onClick={() => sendCommand(c.cmd)} title={c.cmd}
                 className="text-xs px-2.5 py-1 rounded-md transition-all font-medium"
@@ -437,6 +499,20 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           </div>
         </div>
       </div>
+
+      {/* Login status messages */}
+      {loginStatus === "no-token" && (
+        <div className="px-3 py-1.5 text-xs flex items-center gap-2"
+          style={{ background: "var(--color-warning-muted)", color: "var(--color-warning)" }}>
+          No Claude token found. <a href="/connections" className="underline font-medium">Go to Connections</a> to set up your token first.
+        </div>
+      )}
+      {loginStatus === "error" && (
+        <div className="px-3 py-1.5 text-xs"
+          style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
+          Auto-login failed. Try manually or check your token in Connections.
+        </div>
+      )}
 
       {/* Terminal — with drag & paste image support */}
       <div ref={termRef} className="flex-1 min-h-0"

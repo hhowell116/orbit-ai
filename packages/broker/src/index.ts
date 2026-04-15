@@ -967,6 +967,23 @@ teamApi.get("/connections/claude/status", (c) => {
   return c.json({ connected: false, reason: "No Claude API key configured" });
 });
 
+// Return the user's decrypted Claude token for auto-login (only their own)
+teamApi.get("/connections/claude/token", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const conn = db.query(
+    "SELECT token FROM user_connections WHERE user_id = ? AND provider = 'claude'"
+  ).get(user.sub) as { token: string } | null;
+  if (!conn?.token) {
+    return c.json({ error: "No Claude token configured. Go to Connections to add one." }, 404);
+  }
+  try {
+    const decrypted = decrypt(conn.token);
+    return c.json({ token: decrypted });
+  } catch {
+    return c.json({ error: "Failed to decrypt token" }, 500);
+  }
+});
+
 teamApi.get("/connections/github/status", (c) => {
   const user = c.get("user") as JWTPayload;
   const conn = db.query("SELECT token FROM user_connections WHERE user_id = ? AND provider = 'github'").get(user.sub) as any;
