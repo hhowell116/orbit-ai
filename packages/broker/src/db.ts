@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
-import { encrypt, isEncrypted } from "./crypto";
+import { encrypt, isEncrypted, legacyDecrypt, removeLegacyKeyFile } from "./crypto";
 
 const DB_PATH = process.env.DB_PATH || join(import.meta.dir, "..", "team.db");
 
@@ -170,35 +170,73 @@ function runMigrations() {
 
 runMigrations();
 
-// Encrypt any existing plaintext keys in the database
-function encryptExistingKeys() {
-  // Encrypt legacy team-level keys
-  const teams = db.prepare("SELECT id, anthropic_api_key, github_token FROM teams").all() as {
-    id: string; anthropic_api_key: string | null; github_token: string | null;
+// Migrate tokens to per-user encryption keys.
+// Handles: plaintext → per-user encrypted, and legacy global-key encrypted → per-user encrypted.
+function migrateToPerUserEncryption() {
+  // Check if migration already ran
+  db.exec("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, ran_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+  const migrated = db.query("SELECT 1 FROM _migrations WHERE name = 'per_user_encryption'").get();
+  if (migrated) return;
+
+  console.log("[crypto] Migrating to per-user encryption keys...");
+
+  // Migrate user_connections tokens
+  const conns = db.prepare("SELECT rowid, user_id, token FROM user_connections").all() as {
+    rowid: number; user_id: string; token: string;
+  }[];
+  for (const conn of conns) {
+    if (!conn.token) continue;
+    let plaintext: string;
+    if (!isEncrypted(conn.token)) {
+      // Plaintext token — use directly
+      plaintext = conn.token;
+    } else {
+      // Encrypted with old global key — decrypt first
+      try {
+        plaintext = legacyDecrypt(conn.token);
+      } catch {
+        console.warn(`[crypto] Could not decrypt token for user ${conn.user_id} (rowid ${conn.rowid}), skipping`);
+        continue;
+      }
+    }
+    // Re-encrypt with per-user derived key
+    const reEncrypted = encrypt(plaintext, conn.user_id);
+    db.run("UPDATE user_connections SET token = ? WHERE rowid = ?", [reEncrypted, conn.rowid]);
+    console.log(`[crypto] Re-encrypted token for user ${conn.user_id} (${conn.rowid})`);
+  }
+
+  // Migrate legacy team-level keys (use team owner as the userId)
+  const teams = db.prepare("SELECT id, owner_id, anthropic_api_key, github_token FROM teams").all() as {
+    id: string; owner_id: string; anthropic_api_key: string | null; github_token: string | null;
   }[];
   for (const team of teams) {
-    if (team.anthropic_api_key && !isEncrypted(team.anthropic_api_key)) {
-      db.run("UPDATE teams SET anthropic_api_key = ? WHERE id = ?", [encrypt(team.anthropic_api_key), team.id]);
-      console.log(`[crypto] Encrypted existing API key for team ${team.id}`);
+    if (team.anthropic_api_key) {
+      let plaintext: string;
+      if (!isEncrypted(team.anthropic_api_key)) {
+        plaintext = team.anthropic_api_key;
+      } else {
+        try { plaintext = legacyDecrypt(team.anthropic_api_key); } catch { continue; }
+      }
+      db.run("UPDATE teams SET anthropic_api_key = ? WHERE id = ?", [encrypt(plaintext, team.owner_id), team.id]);
     }
-    if (team.github_token && !isEncrypted(team.github_token)) {
-      db.run("UPDATE teams SET github_token = ? WHERE id = ?", [encrypt(team.github_token), team.id]);
-      console.log(`[crypto] Encrypted existing GitHub token for team ${team.id}`);
+    if (team.github_token) {
+      let plaintext: string;
+      if (!isEncrypted(team.github_token)) {
+        plaintext = team.github_token;
+      } else {
+        try { plaintext = legacyDecrypt(team.github_token); } catch { continue; }
+      }
+      db.run("UPDATE teams SET github_token = ? WHERE id = ?", [encrypt(plaintext, team.owner_id), team.id]);
     }
   }
 
-  // Encrypt user_connections tokens
-  const conns = db.prepare("SELECT rowid, token FROM user_connections").all() as {
-    rowid: number; token: string;
-  }[];
-  for (const conn of conns) {
-    if (conn.token && !isEncrypted(conn.token)) {
-      db.run("UPDATE user_connections SET token = ? WHERE rowid = ?", [encrypt(conn.token), conn.rowid]);
-      console.log(`[crypto] Encrypted existing user connection token (rowid ${conn.rowid})`);
-    }
-  }
+  db.run("INSERT INTO _migrations (name) VALUES ('per_user_encryption')");
+  console.log("[crypto] Per-user encryption migration complete.");
+
+  // Clean up the legacy key file from disk
+  removeLegacyKeyFile();
 }
-encryptExistingKeys();
+migrateToPerUserEncryption();
 
 export { db };
 export type { Database };

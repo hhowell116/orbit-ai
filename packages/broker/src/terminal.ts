@@ -60,7 +60,7 @@ function getUserClaudeToken(userId: string): { token: string; type: "oauth" | "a
   if (!conn?.token) return null;
 
   try {
-    const decrypted = decrypt(conn.token);
+    const decrypted = decrypt(conn.token, userId);
     if (decrypted.startsWith("sk-ant-oat")) return { token: decrypted, type: "oauth" };
     return { token: decrypted, type: "apikey" };
   } catch {
@@ -101,8 +101,20 @@ export async function createSession(
     }
   }
 
+  // Build PTY environment — start from process.env but strip sensitive broker vars
+  const SENSITIVE_VARS = [
+    "ORBIT_MASTER_KEY", "ENCRYPTION_KEY", "ENCRYPTION_KEY_FILE",
+    "JWT_SECRET", "DATABASE_URL", "DB_PATH",
+  ];
+  const baseEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && !SENSITIVE_VARS.includes(k)) {
+      baseEnv[k] = v;
+    }
+  }
+
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...baseEnv,
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
     CLAUDE_CONFIG_DIR: claudeConfigDir,

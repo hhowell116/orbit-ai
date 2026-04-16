@@ -660,7 +660,7 @@ function getProjectForGit(c: any) {
 function getUserGitHubToken(userId: string): string | null {
   const conn = db.query("SELECT token FROM user_connections WHERE user_id = ? AND provider = 'github'").get(userId) as any;
   if (!conn?.token) return null;
-  try { return decrypt(conn.token); } catch { return null; }
+  try { return decrypt(conn.token, userId); } catch { return null; }
 }
 
 teamApi.get("/projects/:id/git/status", (c) => {
@@ -1065,7 +1065,7 @@ teamApi.get("/connections/claude/token", (c) => {
     return c.json({ error: "No Claude token configured. Go to Connections to add one." }, 404);
   }
   try {
-    const decrypted = decrypt(conn.token);
+    const decrypted = decrypt(conn.token, user.sub);
     return c.json({ token: decrypted });
   } catch {
     return c.json({ error: "Failed to decrypt token" }, 500);
@@ -1099,7 +1099,7 @@ teamApi.put("/connections/:provider", async (c) => {
     return c.json({ error: "Token is required" }, 400);
   }
 
-  const encryptedToken = encrypt(token);
+  const encryptedToken = encrypt(token, user.sub);
   db.run(`
     INSERT INTO user_connections (user_id, provider, token, updated_at)
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)

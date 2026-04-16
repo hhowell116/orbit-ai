@@ -333,10 +333,53 @@ The watcher ignores: `node_modules/`, `.git/`, `.DS_Store`, `__pycache__/`, `.py
 
 ## Security
 
-### Token Encryption
-All tokens (Claude API key, GitHub PAT) are encrypted using **AES-256-GCM** before storage. The encryption key is auto-generated on first run (saved to `packages/broker/.encryption-key`, gitignored) or read from `ENCRYPTION_KEY` env var.
+### Threat Model
 
-Format: `iv:ciphertext:tag` (hex-encoded). Even with direct DB access, tokens are unreadable without the server-side key.
+Users get full PTY (terminal) access on the VM — that's how Orbit AI works. This means every user can run arbitrary shell commands on the host. The encryption system must protect user secrets (Claude tokens, GitHub PATs) even from other authenticated users who have shell access.
+
+### Per-User Encryption Keys
+
+Tokens are encrypted with **AES-256-GCM** using a **per-user derived key**, not a single global key. Each user's encryption key is derived from a master secret combined with their user ID:
+
+```
+userKey = HMAC-SHA256(masterSecret, userId)
+```
+
+This means:
+- Each user's tokens are encrypted with a unique key
+- Compromising the database alone reveals nothing — you also need the master secret
+- Compromising the master secret alone reveals nothing — you also need the database
+- Even with both, you'd need to write custom code to derive each user's key and decrypt
+
+**Storage format:** `iv:ciphertext:tag` (hex-encoded), same as before but now per-user keyed.
+
+### Master Key Location
+
+The master key is stored at `~/.config/orbit-ai/.mk` (0600 permissions, outside the repo). It is:
+
+- **Not in the repo directory** — PTY users browsing the broker source won't find it
+- **Not in any environment variable** — won't appear in `/proc/PID/environ`
+- **Not passed to PTY child processes** — scrubbed from the environment before PTY spawn
+- **Read once at broker startup** into memory, then only exists in the broker's heap
+
+On first run, the key is auto-generated and saved. If migrating from an older install, the broker auto-migrates the legacy `.encryption-key` file to the secure location and deletes the old file.
+
+### PTY Environment Scrubbing
+
+When the broker spawns a PTY session for a user, it explicitly strips sensitive variables before passing the environment to the child process:
+
+```
+Stripped: ORBIT_MASTER_KEY, ENCRYPTION_KEY, ENCRYPTION_KEY_FILE,
+          JWT_SECRET, DATABASE_URL, DB_PATH
+```
+
+This prevents secrets from leaking through `env`, `printenv`, or `/proc/self/environ` inside a user's terminal session.
+
+### Database Hardening
+
+- `team.db` is set to `0600` (owner-only read/write)
+- Tokens are encrypted at rest with per-user keys
+- The `_migrations` table tracks one-time encryption migrations
 
 ### Per-User Isolation
 - Connection routes are scoped to the authenticated user's JWT
@@ -345,6 +388,22 @@ Format: `iv:ciphertext:tag` (hex-encoded). Even with direct DB access, tokens ar
 - Git push uses the current user's token, not a shared credential
 - Terminal PTYs are isolated: each user gets their own `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN`
 - PTY processes run in the user's project directory with scoped environment variables
+
+### Defense Layers Summary
+
+| Attack vector | Mitigation |
+|---------------|------------|
+| Read broker directory for key file | Key file moved outside repo to `~/.config/orbit-ai/.mk` |
+| Read `team.db` directly | Tokens encrypted with per-user derived keys, DB is 0600 |
+| Read `/proc/PID/environ` of broker | Master key never in environment variables |
+| Run `env`/`printenv` in PTY | Sensitive vars stripped before PTY spawn |
+| Get master key + DB | Still need to derive per-user keys via HMAC + write custom decryption code |
+
+### Implementation
+
+- `packages/broker/src/crypto.ts` — master key loading, per-user key derivation (`deriveUserKey`), encrypt/decrypt with userId parameter, legacy migration helpers
+- `packages/broker/src/db.ts` — one-time migration from global encryption to per-user encryption (`migrateToPerUserEncryption`)
+- `packages/broker/src/terminal.ts` — environment scrubbing before PTY spawn
 
 ### Team Ownership Transfer
 Team owners can transfer ownership to another member via `POST /teams/:id/transfer`. The old owner becomes admin, the new owner gets full control.

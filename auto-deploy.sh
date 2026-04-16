@@ -43,39 +43,27 @@ while true; do
     echo "$(date) - Building dashboard..." | tee -a "$LOG_FILE"
     cd packages/dashboard && npx vite build 2>&1 | tee -a "$LOG_FILE" && cd ../..
 
-    # Restart only the broker (tunnel stays running)
-    echo "$(date) - Restarting broker..." | tee -a "$LOG_FILE"
-    kill $(lsof -ti:5000) 2>/dev/null || true
-    sleep 1
-
-    cd "$REPO_DIR/packages/broker"
-    nohup bun run src/index.ts > /tmp/orbit-broker.log 2>&1 &
-    sleep 1
+    # Restart broker via systemd (tunnel is also managed by systemd)
+    echo "$(date) - Restarting broker via systemd..." | tee -a "$LOG_FILE"
+    systemctl --user restart orbit-broker.service
+    sleep 2
 
     if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
       echo "$(date) - Deploy complete! $(git log --oneline -1)" | tee -a "$LOG_FILE"
     else
-      echo "$(date) - WARNING: Broker may have failed to start. Check /tmp/orbit-broker.log" | tee -a "$LOG_FILE"
+      echo "$(date) - WARNING: Broker may have failed to start. Check: journalctl --user -u orbit-broker -n 50" | tee -a "$LOG_FILE"
     fi
 
     # Force Claude Code update on next cycle after deploy (migration to native installer)
     rm -f "$CLAUDE_UPDATE_STAMP"
-
-    # Ensure tunnel is still alive after broker restart
-    if ! pgrep -f "cloudflared tunnel run" > /dev/null 2>&1; then
-      echo "$(date) - Tunnel died during deploy, restarting..." | tee -a "$LOG_FILE"
-      nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
-      sleep 2
-      echo "$(date) - Tunnel restarted (PID $!)" | tee -a "$LOG_FILE"
-    fi
   fi
 
-  # Periodic tunnel health check (every poll cycle, not just on deploy)
-  if ! pgrep -f "cloudflared tunnel run" > /dev/null 2>&1; then
-    echo "$(date) - Tunnel not running, starting..." | tee -a "$LOG_FILE"
-    nohup cloudflared tunnel run orbit-ai > /tmp/orbit-tunnel.log 2>&1 &
+  # Periodic tunnel health check via systemd (every poll cycle)
+  if ! systemctl --user is-active --quiet cloudflared-tunnel.service; then
+    echo "$(date) - Tunnel not running, restarting via systemd..." | tee -a "$LOG_FILE"
+    systemctl --user restart cloudflared-tunnel.service
     sleep 2
-    echo "$(date) - Tunnel started (PID $!)" | tee -a "$LOG_FILE"
+    echo "$(date) - Tunnel restarted via systemd" | tee -a "$LOG_FILE"
   fi
 
   # Daily Claude Code auto-update — runs once every 24 hours
