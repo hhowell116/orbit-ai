@@ -30,7 +30,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      bracketedPasteMode: false, // Disable bracket paste so tokens paste cleanly in password prompts
+      ignoreBracketedPasteMode: true,
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
       theme: {
         background: "#0d1117",
@@ -66,10 +66,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     termInstance.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Welcome message
-    term.writeln("\x1b[38;2;250;178;131m  Orbit AI Terminal\x1b[0m");
-    term.writeln("\x1b[38;2;139;148;158m  Type \"claude\" to start Claude Code with your subscription.\x1b[0m");
-    term.writeln("");
+    let welcomeShown = false;
 
     // Connect WebSocket
     function connect() {
@@ -93,7 +90,12 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
               term.write(msg.data);
               break;
             case "connected":
-              // Session established
+              if (!msg.resumed && !welcomeShown) {
+                term.writeln("\x1b[38;2;250;178;131m  Orbit AI Terminal\x1b[0m");
+                term.writeln("\x1b[38;2;139;148;158m  Type \"claude\" to start Claude Code with your subscription.\x1b[0m");
+                term.writeln("");
+              }
+              welcomeShown = true;
               break;
             case "error":
               setErrorMsg(msg.message);
@@ -111,7 +113,6 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
 
       ws.onclose = () => {
         setStatus("disconnected");
-        term.writeln("\r\n\x1b[33mDisconnected. Reconnecting...\x1b[0m");
         reconnectTimer.current = window.setTimeout(connect, 3000);
       };
 
@@ -250,8 +251,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
         body: formData,
       });
       if (res.ok) {
-        const data = await res.json();
-        // Type the file path into the terminal so Claude can reference it
+        await res.json();
         sendCommand(`# Image uploaded: ${file.name}`);
       }
     } catch {}

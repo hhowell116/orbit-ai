@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
 import { OrbitalBackground } from "../components/OrbitalBackground";
@@ -18,6 +18,7 @@ interface ActivityEntry {
   id: number;
   event_type: string;
   file_path?: string;
+  detail?: string;
   user_display_name: string;
   project_name: string;
   created_at: string;
@@ -45,9 +46,21 @@ export function ProjectsPage() {
   const [createError, setCreateError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedStat, setExpandedStat] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const navigate = useNavigate();
   const { user, logout, activeTeam } = useAuthStore();
   const broker = useBroker();
+
+  async function handleRestartBroker() {
+    if (!confirm("Restart the broker server? All active sessions will be interrupted.")) return;
+    setRestarting(true);
+    try {
+      await broker.restartBroker();
+    } catch (err: any) {
+      alert(err.message || "Failed to restart broker");
+      setRestarting(false);
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -70,7 +83,6 @@ export function ProjectsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const totalActiveUsers = Math.max(1, projects.reduce((sum, p) => sum + (p.active_users || 0), 0));
   const activeSessions = sessions.filter((s) => s.status !== "ended");
   const thinkingSessions = sessions.filter((s) => s.status === "thinking");
 
@@ -430,8 +442,30 @@ export function ProjectsPage() {
             ))}
           </div>
 
-          {/* Team name */}
+          {/* Admin actions */}
           <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--color-border)" }}>
+            <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>Server</div>
+            <button
+              onClick={handleRestartBroker}
+              disabled={restarting}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+              style={{ color: restarting ? "var(--color-text-muted)" : "var(--color-warning)" }}
+              onMouseEnter={(e) => { if (!restarting) { e.currentTarget.style.background = "var(--color-bg-hover)"; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <svg viewBox="0 0 16 16" className={`w-4 h-4 shrink-0${restarting ? " animate-spin" : ""}`} fill="currentColor">
+                <path d="M11.534 7h3.932a.25.25 0 01.192.41l-1.966 2.36a.25.25 0 01-.384 0l-1.966-2.36a.25.25 0 01.192-.41zm-11 2H4.466a.25.25 0 00.192-.41L2.692 6.23a.25.25 0 00-.384 0L.342 8.59A.25.25 0 00.534 9z"/>
+                <path fillRule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 11-.771-.636A6.002 6.002 0 0113.917 7H12.9A5.002 5.002 0 008 3zM3.1 9a5.002 5.002 0 008.757 2.182.5.5 0 11.771.636A6.002 6.002 0 012.083 9H3.1z"/>
+              </svg>
+              <div>
+                <div className="text-sm">{restarting ? "Restarting..." : "Restart Broker"}</div>
+                <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Restart the server</div>
+              </div>
+            </button>
+          </div>
+
+          {/* Team name */}
+          <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--color-border)" }}>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--color-text-muted)" }}>Team</div>
             <div className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>{activeTeam?.name || "—"}</div>
           </div>

@@ -185,5 +185,8 @@ export function useBroker() {
 
     // Usage
     getUsage: () => brokerFetch("/usage"),
+
+    // Admin
+    restartBroker: () => brokerFetch("/admin/restart-broker", { method: "POST" }),
   };
 }

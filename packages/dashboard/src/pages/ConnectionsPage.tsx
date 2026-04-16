@@ -1,12 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
 import { OrbitalBackground } from "../components/OrbitalBackground";
 
 export function ConnectionsPage() {
   const navigate = useNavigate();
-  const { activeTeam } = useAuthStore();
   const broker = useBroker();
 
   const [claudeConnected, setClaudeConnected] = useState(false);

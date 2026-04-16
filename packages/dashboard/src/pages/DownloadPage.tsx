@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+
 import { OrbitalBackground } from "../components/OrbitalBackground";
 
 const REPO = "hhowell116/orbit-ai";
@@ -55,7 +55,6 @@ const platformInfo: Record<Platform, { label: string; icon: string; description:
 };
 
 export function DownloadPage() {
-  const navigate = useNavigate();
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>(detectPlatform());
   const [assets, setAssets] = useState<Asset[]>([]);
   const [version, setVersion] = useState("");

@@ -1426,6 +1426,26 @@ teamApi.get("/usage", (c) => {
   return c.json(usage);
 });
 
+// -- Admin: Restart broker service --
+teamApi.post("/admin/restart-broker", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const membership = db
+    .query("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?")
+    .get(user.team_id, user.sub) as { role: string } | null;
+
+  if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+    return c.json({ error: "Only owners and admins can restart the broker" }, 403);
+  }
+
+  Bun.spawn(["bash", "-c", "sleep 1 && systemctl --user restart orbit-broker.service"], {
+    stdout: "ignore",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+
+  return c.json({ ok: true, message: "Broker restart initiated" });
+});
+
 // =============================================
 // MOUNT ROUTES
 // =============================================
@@ -1446,6 +1466,7 @@ import { startWatching, stopWatching, setFilewatcherBroadcast, setTerminalWarnin
 setFilewatcherBroadcast(broadcast);
 
 const wsClients = new Map<string, Set<any>>(); // sessionKey → Set of WebSocket clients
+const disconnectTimers = new Map<string, Timer>(); // sessionKey → grace period timer
 
 // Track current Claude file activity by scanning PTY output
 const sessionFileActivity = new Map<string, Map<string, { action: string; ts: number }>>();
@@ -1571,6 +1592,14 @@ export default {
         return;
       }
 
+      // Cancel any pending disconnect grace period
+      const pendingTimer = disconnectTimers.get(sessionKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        disconnectTimers.delete(sessionKey);
+        console.log(`[ws] Reconnect cancelled disconnect timer for ${sessionKey}`);
+      }
+
       // Track this client
       if (!wsClients.has(sessionKey)) wsClients.set(sessionKey, new Set());
       wsClients.get(sessionKey)!.add(ws);
@@ -1588,10 +1617,14 @@ export default {
           [dbSessionId, projectId, userId]
         );
         const dbSession = db.query("SELECT s.*, u.display_name as user_display_name, p.name as project_name FROM sessions s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN projects p ON p.id = s.project_id WHERE s.id = ?").get(dbSessionId);
-        broadcast("session.created", dbSession);
         ws.data.dbSessionId = dbSessionId;
 
-        // Only log activity for genuinely new sessions, not reconnects
+        if (isNewSession) {
+          broadcast("session.created", dbSession);
+        } else {
+          broadcast("session.resumed", dbSession);
+        }
+
         if (isNewSession) {
           db.run(
             "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.created', ?)",
@@ -1618,11 +1651,12 @@ export default {
 
       // Send buffered output for reconnection
       const buffer = getSessionBuffer(userId, projectId || undefined);
-      if (buffer.length > 0) {
+      const resumed = buffer.length > 0;
+      if (resumed) {
         ws.send(JSON.stringify({ type: "output", data: buffer.join("") }));
       }
 
-      ws.send(JSON.stringify({ type: "connected", userId }));
+      ws.send(JSON.stringify({ type: "connected", userId, resumed }));
       console.log(`[ws] Terminal connected: ${username} (${sessionKey})`);
     },
 
@@ -1658,28 +1692,36 @@ export default {
       if (clients) {
         clients.delete(ws);
         if (clients.size === 0) {
-          console.log(`[ws] All clients disconnected from ${sessionKey} — session persists`);
-          // Update presence — mark session as ended so other users see them leave
-          if (dbSessionId) {
-            // Only log ended if session was actually active (not already ended)
-            const wasActive = db.query("SELECT status FROM sessions WHERE id = ? AND status != 'ended'").get(dbSessionId);
+          console.log(`[ws] All clients disconnected from ${sessionKey} — grace period started`);
 
-            db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
-            broadcast("session.ended", { id: dbSessionId });
+          // Grace period: wait 10 seconds before marking session as ended.
+          // If the client reconnects within this window, the timer is cancelled.
+          const timer = setTimeout(() => {
+            disconnectTimers.delete(sessionKey);
 
-            // Stop file watcher and release all locks
-            if (projectId) {
-              stopWatching(userId, projectId);
+            // Check if a client reconnected during the grace period
+            const currentClients = wsClients.get(sessionKey);
+            if (currentClients && currentClients.size > 0) return;
 
-              // Only log to activity if it was a real session end, not a brief reconnect blip
-              if (wasActive) {
-                db.run(
-                  "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
-                  [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
-                );
+            console.log(`[ws] Grace period expired for ${sessionKey} — marking ended`);
+            if (dbSessionId) {
+              const wasActive = db.query("SELECT status FROM sessions WHERE id = ? AND status != 'ended'").get(dbSessionId);
+              db.run("UPDATE sessions SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [dbSessionId]);
+              broadcast("session.ended", { id: dbSessionId });
+
+              if (projectId) {
+                stopWatching(userId, projectId);
+                if (wasActive) {
+                  db.run(
+                    "INSERT INTO activity (project_id, user_id, session_id, event_type, detail) VALUES (?, ?, ?, 'session.ended', ?)",
+                    [projectId, userId, dbSessionId, JSON.stringify({ title: "Terminal" })]
+                  );
+                }
               }
             }
-          }
+          }, 10_000);
+
+          disconnectTimers.set(sessionKey, timer);
         }
       }
     },
