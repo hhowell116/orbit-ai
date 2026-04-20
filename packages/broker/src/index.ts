@@ -54,7 +54,36 @@ app.get("/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOStri
 // =============================================
 const api = new Hono();
 
+// --- Access control ---
+// Lockdown via env var `ALLOWED_EMAIL_DOMAINS` (comma-separated list of domains).
+// If set, signup/login/Google auth reject anyone whose email isn't on the list.
+// If unset/empty, access is open (legacy behavior).
+const ALLOWED_EMAIL_DOMAINS = (process.env.ALLOWED_EMAIL_DOMAINS || "")
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+const ACCESS_RESTRICTED_MSG =
+  ALLOWED_EMAIL_DOMAINS.length === 1
+    ? `Access restricted to @${ALLOWED_EMAIL_DOMAINS[0]} email addresses.`
+    : `Access restricted to approved email domains.`;
+
+function emailDomainAllowed(email: string | null | undefined): boolean {
+  if (ALLOWED_EMAIL_DOMAINS.length === 0) return true;
+  if (!email) return false;
+  const domain = email.toLowerCase().split("@")[1];
+  if (!domain) return false;
+  return ALLOWED_EMAIL_DOMAINS.includes(domain);
+}
+
 // --- Auth routes (no middleware) ---
+
+api.get("/auth/access-policy", (c) => {
+  return c.json({
+    restricted: ALLOWED_EMAIL_DOMAINS.length > 0,
+    allowed_domains: ALLOWED_EMAIL_DOMAINS,
+    message: ALLOWED_EMAIL_DOMAINS.length > 0 ? ACCESS_RESTRICTED_MSG : null,
+  });
+});
 
 api.post("/auth/signup", async (c) => {
   const { username, email, password, display_name } = await c.req.json<{
@@ -66,6 +95,16 @@ api.post("/auth/signup", async (c) => {
 
   if (!username || !password || !display_name) {
     return c.json({ error: "username, password, and display_name are required" }, 400);
+  }
+
+  // When lockdown is active, email is required and must be on an allowed domain.
+  if (ALLOWED_EMAIL_DOMAINS.length > 0) {
+    if (!email) {
+      return c.json({ error: ACCESS_RESTRICTED_MSG }, 403);
+    }
+    if (!emailDomainAllowed(email)) {
+      return c.json({ error: ACCESS_RESTRICTED_MSG }, 403);
+    }
   }
 
   // Check if username or email already exists
@@ -121,6 +160,10 @@ api.post("/auth/google", async (c) => {
 
   if (!googleEmail) return c.json({ error: "No email in Google token" }, 400);
 
+  if (!emailDomainAllowed(googleEmail)) {
+    return c.json({ error: ACCESS_RESTRICTED_MSG }, 403);
+  }
+
   // Find or create user by email
   let user = db
     .query("SELECT id, username, display_name FROM users WHERE email = ?")
@@ -159,8 +202,8 @@ api.post("/auth/login", async (c) => {
   const { username, password } = await c.req.json<{ username: string; password: string }>();
 
   const user = db
-    .query("SELECT id, username, display_name, password_hash FROM users WHERE username = ?")
-    .get(username) as { id: string; username: string; display_name: string; password_hash: string } | null;
+    .query("SELECT id, username, display_name, password_hash, email FROM users WHERE username = ?")
+    .get(username) as { id: string; username: string; display_name: string; password_hash: string; email: string | null } | null;
 
   if (!user) {
     return c.json({ error: "Invalid credentials" }, 401);
@@ -169,6 +212,12 @@ api.post("/auth/login", async (c) => {
   const valid = await Bun.password.verify(password, user.password_hash);
   if (!valid) {
     return c.json({ error: "Invalid credentials" }, 401);
+  }
+
+  // Enforce domain allowlist on existing accounts too — blocks legacy/seed users
+  // whose stored email isn't on the approved list.
+  if (!emailDomainAllowed(user.email)) {
+    return c.json({ error: ACCESS_RESTRICTED_MSG }, 403);
   }
 
   // Get user's teams

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
@@ -6,14 +6,28 @@ import { useAuthStore } from "../stores/authStore";
 import { useBroker } from "../hooks/useBroker";
 import { OrbitalBackground } from "../components/OrbitalBackground";
 
+interface AccessPolicy {
+  restricted: boolean;
+  allowed_domains: string[];
+  message: string | null;
+}
+
 export function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ display_name: "", username: "", email: "", password: "", confirm: "" });
+  const [policy, setPolicy] = useState<AccessPolicy>({ restricted: false, allowed_domains: [], message: null });
   const navigate = useNavigate();
   const { signup, login, selectTeam } = useAuthStore();
   const broker = useBroker();
+
+  useEffect(() => {
+    fetch("/api/auth/access-policy")
+      .then((r) => r.json())
+      .then((p: AccessPolicy) => setPolicy(p))
+      .catch(() => {});
+  }, []);
 
   async function handleGoogleSignup() {
     setError("");
@@ -48,12 +62,28 @@ export function SignupPage() {
     }
   }
 
+  function emailDomainValid(email: string): boolean {
+    if (!policy.restricted || policy.allowed_domains.length === 0) return true;
+    const domain = email.toLowerCase().split("@")[1];
+    return !!domain && policy.allowed_domains.includes(domain);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.display_name || !form.username || !form.password) return;
     if (form.password !== form.confirm) {
       setError("Passwords don't match");
       return;
+    }
+    if (policy.restricted) {
+      if (!form.email) {
+        setError(policy.message || "Email is required.");
+        return;
+      }
+      if (!emailDomainValid(form.email)) {
+        setError(policy.message || "Email domain is not permitted.");
+        return;
+      }
     }
 
     setError("");
@@ -133,9 +163,15 @@ export function SignupPage() {
                 onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")} onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")} />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>Email</label>
-              <input type="email" value={form.email} onChange={set("email")} className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none" style={inputStyle} placeholder="you@company.com (optional)"
+              <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>
+                Email {policy.restricted ? "*" : ""}
+              </label>
+              <input type="email" value={form.email} onChange={set("email")} required={policy.restricted} className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none" style={inputStyle}
+                placeholder={policy.restricted && policy.allowed_domains[0] ? `you@${policy.allowed_domains[0]}` : "you@company.com (optional)"}
                 onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")} onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")} />
+              {policy.restricted && policy.message && (
+                <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>{policy.message}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 uppercase tracking-wider" style={{ color: "var(--color-text-muted)" }}>Password *</label>
