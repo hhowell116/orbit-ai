@@ -642,12 +642,6 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           Auto-login failed. Try manually or check your token in Connections.
         </div>
       )}
-      {firebaseStatus === "logging-in" && (
-        <div className="px-3 py-1.5 text-xs flex items-center gap-2"
-          style={{ background: "rgba(255,167,38,0.1)", color: "#FFA726" }}>
-          Running firebase login:ci — open the URL in your browser to authenticate. Your token will be auto-saved.
-        </div>
-      )}
       {firebaseStatus === "token-saved" && (
         <div className="px-3 py-1.5 text-xs flex items-center gap-2"
           style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>
