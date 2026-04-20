@@ -1799,7 +1799,7 @@ export default {
       console.log(`[ws] Terminal connected: ${username} (${sessionKey})`);
     },
 
-    message(ws: any, message: string | Buffer) {
+    async message(ws: any, message: string | Buffer) {
       try {
         const msg = JSON.parse(typeof message === "string" ? message : message.toString());
         const { userId, projectId } = ws.data;
@@ -1838,6 +1838,25 @@ export default {
           case "ping":
             ws.send(JSON.stringify({ type: "pong" }));
             break;
+          case "reset": {
+            const sk = projectId ? `${userId}:${projectId}` : userId;
+            console.log(`[ws] Terminal reset requested for ${sk}`);
+            destroySession(userId, projectId || undefined);
+            wiredSessions.delete(sk);
+            const newSession = await createSession(userId, projectId, msg.cols || 80, msg.rows || 24);
+            if (newSession) {
+              wireSessionOutput(sk, newSession, userId);
+              const clients = wsClients.get(sk);
+              if (clients) {
+                for (const client of clients) {
+                  try { client.send(JSON.stringify({ type: "connected", userId, resumed: false })); } catch {}
+                }
+              }
+            } else {
+              ws.send(JSON.stringify({ type: "error", message: "Failed to reset terminal session." }));
+            }
+            break;
+          }
         }
       } catch (err) {
         console.error("[ws] Message error:", err);

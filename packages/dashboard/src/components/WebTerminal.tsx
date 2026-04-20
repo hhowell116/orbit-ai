@@ -402,6 +402,18 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     }, 300);
   }
 
+  function handleResetTerminal() {
+    if (wsRef.current?.readyState === WebSocket.OPEN && termInstance.current) {
+      wsRef.current.send(JSON.stringify({
+        type: "reset",
+        cols: termInstance.current.cols,
+        rows: termInstance.current.rows,
+      }));
+      termInstance.current.reset();
+    }
+    termInstance.current?.focus();
+  }
+
   const slashCommands = [
     { label: "/plan", cmd: "/plan", color: "var(--color-accent)" },
     { label: "/compact", cmd: "/compact", color: "var(--color-secondary)" },
@@ -566,8 +578,16 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           </label>
           </div>
 
-          {/* Right: Firebase Auth + Swap Model + Launch Claude */}
+          {/* Right: Reset + Firebase Auth + Swap Model + Launch Claude */}
           <div className="flex items-center gap-2 shrink-0">
+            <button onClick={handleResetTerminal}
+              title="Kill current terminal session and start fresh"
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5"
+              style={{ background: "var(--color-bg-elevated)", color: "var(--color-error)", border: "1px solid var(--color-border)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-error)"; e.currentTarget.style.background = "var(--color-error-muted)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; }}>
+              Reset Terminal
+            </button>
             <button onClick={handleAuthFirebase}
               disabled={firebaseStatus === "loading" || firebaseStatus === "injecting" || firebaseStatus === "logging-in"}
               title="Inject saved Firebase token, or run firebase login:ci if none saved"
