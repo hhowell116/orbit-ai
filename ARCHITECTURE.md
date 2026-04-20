@@ -169,16 +169,29 @@ grace-period: 30s          # Let in-flight requests finish during reconnect
 
 ### Self-healing watchdog
 
-`orbit-watchdog.timer` fires `~/.local/bin/orbit-watchdog.sh` every 60 seconds:
+`orbit-watchdog.timer` fires `~/.local/bin/orbit-watchdog.sh` every 60 seconds.
+Conservative design — tolerates transient blips, only acts on sustained failure:
 
-1. `curl https://orbitai.work/` — if 200, done.
-2. If public fails, `curl http://localhost:5000/` directly.
-3. Broker healthy but public down → `systemctl --user restart cloudflared-tunnel`
-   (keeps PTY sessions alive).
-4. Both down → restart broker, then tunnel.
-5. Logs to `~/.local/share/orbit-watchdog.log` (rotates at 1 MB).
+1. **Skip if already restarting** — checks `systemctl is-active` for `activating`
+   / `deactivating` / `reloading` / `auto-restart` on broker and tunnel. Never
+   fights an in-progress restart.
+2. **Skip if in cooldown** — after any restart, a 45-second cooldown file
+   (`/tmp/orbit-watchdog-cooldown`) pauses further probes so the services have
+   time to warm up.
+3. **Probe** `https://orbitai.work/` and `http://localhost:5000/`.
+4. **Require 3 consecutive failures** (tracked in `/tmp/orbit-watchdog-state`)
+   before any restart — this prevents cascading restarts from a single slow
+   second. Soft fails are logged but don't trigger action.
+5. After 3 consecutive failures:
+   - Broker healthy, public down → restart **tunnel only** (keeps PTY sessions
+     alive).
+   - Both down → restart broker, then tunnel.
+6. Logs to `~/.local/share/orbit-watchdog.log` (rotates at 1 MB).
 
-Recovery time for any 1033: **≤60s, fully automatic, no manual reboot needed.**
+Recovery time for sustained outage: **≤3 minutes, fully automatic.** Previously
+the watchdog was single-strike and caused cascading restarts on transient
+broker latency, which killed every active WebSocket session — hence the
+stricter threshold.
 
 ### Systemd hardening
 
