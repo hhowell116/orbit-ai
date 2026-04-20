@@ -58,6 +58,12 @@ export function ProjectPage() {
   const [fileTree, setFileTree] = useState<any[]>([]);
   const [claudeActivity, setClaudeActivity] = useState<{ file: string; action: string }[]>([]);
 
+  // Edit project state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
   // Rules state
   const [projectRules, setProjectRules] = useState("");
   const [teamRules, setTeamRules] = useState("");
@@ -92,6 +98,28 @@ export function ProjectPage() {
         .catch(() => {});
     }
   }, [projectId]);
+
+  function startEditing() {
+    if (!project) return;
+    setEditName(project.name);
+    setEditDescription(project.description || "");
+    setIsEditing(true);
+  }
+
+  async function handleSaveProject() {
+    if (!projectId || !editName.trim()) return;
+    setEditSaving(true);
+    try {
+      const updated = await broker.updateProject(projectId, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+      });
+      setProject(updated);
+      setIsEditing(false);
+    } catch {} finally {
+      setEditSaving(false);
+    }
+  }
 
   async function handleSaveProjectRules() {
     if (!projectId) return;
@@ -274,11 +302,63 @@ export function ProjectPage() {
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}>
           &larr; Projects
         </button>
-        <div className="pl-4" style={{ borderLeft: "1px solid var(--color-border)" }}>
-          <h1 className="font-medium text-sm" style={{ color: "var(--color-text-primary)" }}>{project.name}</h1>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{project.description}</p>
+        <div className="pl-4 flex-1 min-w-0" style={{ borderLeft: "1px solid var(--color-border)" }}>
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0 space-y-1">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-2 py-1 rounded text-sm font-medium focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="Project name"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveProject(); if (e.key === "Escape") setIsEditing(false); }}
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full px-2 py-1 rounded text-xs focus:outline-none"
+                  style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-muted)" }}
+                  onFocus={(e) => (e.target.style.borderColor = "var(--color-primary)")}
+                  onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                  placeholder="Description (optional)"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveProject(); if (e.key === "Escape") setIsEditing(false); }}
+                />
+              </div>
+              <button onClick={handleSaveProject} disabled={editSaving || !editName.trim()}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium shrink-0"
+                style={{ background: "var(--color-primary)", color: "var(--color-text-inverse)" }}>
+                {editSaving ? "..." : "Save"}
+              </button>
+              <button onClick={() => setIsEditing(false)}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium shrink-0"
+                style={{ background: "var(--color-bg-hover)", color: "var(--color-text-muted)" }}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 group">
+              <div className="min-w-0">
+                <h1 className="font-medium text-sm" style={{ color: "var(--color-text-primary)" }}>{project.name}</h1>
+                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>{project.description || "No description"}</p>
+              </div>
+              <button onClick={startEditing}
+                className="text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ color: "var(--color-text-muted)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+                title="Edit project">
+                Edit
+              </button>
+            </div>
+          )}
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-3 shrink-0">
           {bridgeConnected && (
             <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
               style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>

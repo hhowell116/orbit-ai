@@ -876,6 +876,28 @@ teamApi.get("/projects/:id", (c) => {
   return c.json(project);
 });
 
+teamApi.patch("/projects/:id", async (c) => {
+  const user = c.get("user") as JWTPayload;
+  const { id } = c.req.param();
+  const { name, description } = await c.req.json<{ name?: string; description?: string }>();
+
+  const project = db.query("SELECT * FROM projects WHERE id = ? AND team_id = ?").get(id, user.team_id);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  if (name !== undefined) {
+    const conflict = db.query("SELECT id FROM projects WHERE name = ? AND id != ? AND team_id = ?").get(name, id, user.team_id);
+    if (conflict) return c.json({ error: "A project with this name already exists" }, 409);
+    db.run("UPDATE projects SET name = ? WHERE id = ?", [name, id]);
+  }
+  if (description !== undefined) {
+    db.run("UPDATE projects SET description = ? WHERE id = ?", [description, id]);
+  }
+
+  const updated = db.query("SELECT * FROM projects WHERE id = ?").get(id);
+  broadcast("project.updated", updated);
+  return c.json(updated);
+});
+
 // Project rules
 teamApi.get("/projects/:id/rules", (c) => {
   const user = c.get("user") as JWTPayload;

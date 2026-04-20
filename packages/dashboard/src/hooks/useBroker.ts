@@ -81,6 +81,8 @@ export function useBroker() {
       brokerFetch("/projects", { method: "POST", body: JSON.stringify(data) }),
     deleteProject: (id: string) =>
       brokerFetch(`/projects/${id}`, { method: "DELETE" }),
+    updateProject: (id: string, data: { name?: string; description?: string }) =>
+      brokerFetch(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     uploadToProject: async (projectId: string, file: File) => {
       const token = useAuthStore.getState().token;
       const formData = new FormData();
