@@ -1814,6 +1814,27 @@ export default {
           case "resize":
             resizeSession(userId, msg.cols, msg.rows, projectId || undefined);
             break;
+          case "reset": {
+            const resetKey = projectId ? `${userId}:${projectId}` : userId;
+            console.log(`[ws] Terminal reset requested for ${resetKey}`);
+            destroySession(userId, projectId || undefined);
+            wiredSessions.delete(resetKey);
+            sessionOutputBuffers.delete(resetKey);
+            sessionFileActivity.delete(resetKey);
+            firebaseTokenBuffers.delete(resetKey);
+            firebaseTokenCaptured.delete(resetKey);
+            const cols = msg.cols || 80;
+            const rows = msg.rows || 24;
+            createSession(userId, projectId, cols, rows).then((newSession) => {
+              if (newSession) {
+                wireSessionOutput(resetKey, newSession, userId);
+                ws.send(JSON.stringify({ type: "connected", userId, resumed: false }));
+              } else {
+                ws.send(JSON.stringify({ type: "error", message: "Failed to create new terminal session" }));
+              }
+            });
+            break;
+          }
           case "ping":
             ws.send(JSON.stringify({ type: "pong" }));
             break;
