@@ -139,15 +139,60 @@ The VM sits behind a corporate firewall — no inbound connections allowed. We n
 
 **Domain:** `orbitai.work` (Cloudflare Registrar)
 **Tunnel:** Named tunnel `orbit-ai` (free, permanent, unlimited bandwidth)
+**Tunnel UUID:** `6ace143f-371e-474a-abbd-4238b5e5d961`
+**Config:** `~/.cloudflared/config.yml`
 
 ```
 VM runs: cloudflared tunnel run orbit-ai
-  → Outbound connection to Cloudflare edge
+  → Outbound HTTP/2 connection to Cloudflare edge (TCP 443)
   → orbitai.work CNAME → tunnel UUID
   → Browser request → Cloudflare → tunnel → localhost:5000
 ```
 
 The tunnel stays running permanently. On deploys, only the broker restarts — zero downtime.
+
+### Why HTTP/2 instead of QUIC
+
+The Vultr VM uses a Hyper-V virtual switch internally (`mshome.net`, DNS relay at
+`172.28.160.1`). QUIC/UDP is unreliable through this path — UDP packets get dropped
+under load or during host maintenance, which tears down all 4 edge connections and
+surfaces as a Cloudflare **1033 Argo Tunnel Host Error** to users.
+
+`~/.cloudflared/config.yml` forces TCP-based transport:
+
+```yaml
+protocol: http2            # TCP/443 instead of QUIC/UDP — survives UDP drops
+edge-ip-version: "4"       # Skip IPv6, simpler path
+retries: 10                # More aggressive reconnect on failure
+grace-period: 30s          # Let in-flight requests finish during reconnect
+```
+
+### Self-healing watchdog
+
+`orbit-watchdog.timer` fires `~/.local/bin/orbit-watchdog.sh` every 60 seconds:
+
+1. `curl https://orbitai.work/` — if 200, done.
+2. If public fails, `curl http://localhost:5000/` directly.
+3. Broker healthy but public down → `systemctl --user restart cloudflared-tunnel`
+   (keeps PTY sessions alive).
+4. Both down → restart broker, then tunnel.
+5. Logs to `~/.local/share/orbit-watchdog.log` (rotates at 1 MB).
+
+Recovery time for any 1033: **≤60s, fully automatic, no manual reboot needed.**
+
+### Systemd hardening
+
+All four user units (`cloudflared-tunnel`, `orbit-broker`, `orbit-autodeploy`,
+`orbit-watchdog`) share:
+
+- `Restart=always`, `RestartSec=5` — auto-restart on any crash
+- `StartLimitIntervalSec=0` — **never** give up restarting (systemd's default
+  5-failures-in-10s cutoff is disabled, so a bad config push can't permanently
+  wedge the service)
+- `Wants=network-online.target` — wait for network before starting
+- `TimeoutStopSec=20` — clean shutdown window
+
+Linger is enabled for user `rowecasa` so these run without an active login.
 
 ---
 
@@ -857,6 +902,15 @@ orbit-ai/
 ├── start.sh                    ← Start broker + tunnel
 ├── stop.sh                     ← Stop broker (--all for tunnel too)
 ├── auto-deploy.sh              ← Polls GitHub, rebuilds, restarts, health checks
+│
+│  External to repo (live on the VM):
+│  ~/.cloudflared/config.yml                         ← Tunnel config (HTTP/2, ingress)
+│  ~/.local/bin/orbit-watchdog.sh                    ← Self-healing health check
+│  ~/.config/systemd/user/cloudflared-tunnel.service ← Tunnel unit
+│  ~/.config/systemd/user/orbit-broker.service       ← Broker unit
+│  ~/.config/systemd/user/orbit-autodeploy.service   ← Auto-deploy unit
+│  ~/.config/systemd/user/orbit-watchdog.service     ← Watchdog oneshot
+│  ~/.config/systemd/user/orbit-watchdog.timer       ← Fires watchdog every 60s
 ├── .claude-update-stamp        ← Timestamp for daily Claude Code updates (auto-generated)
 ├── ARCHITECTURE.md             ← This file
 ├── firebase.json               ← Firebase config (OAuth only)
