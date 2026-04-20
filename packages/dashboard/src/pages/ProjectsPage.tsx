@@ -52,7 +52,7 @@ export function ProjectsPage() {
   const broker = useBroker();
 
   async function handleRestartBroker() {
-    if (!confirm("Restart the broker server? All active sessions will be interrupted.")) return;
+    if (!confirm("Warning: Restarting the broker will immediately end ALL active Claude sessions for every user. Any unsaved work in progress may be lost.\n\nAre you sure you want to continue?")) return;
     setRestarting(true);
     try {
       await broker.restartBroker();
@@ -459,7 +459,7 @@ export function ProjectsPage() {
               </svg>
               <div>
                 <div className="text-sm">{restarting ? "Restarting..." : "Restart Broker"}</div>
-                <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Restart the server</div>
+                <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Ends all active Claude sessions</div>
               </div>
             </button>
           </div>

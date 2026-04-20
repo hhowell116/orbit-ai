@@ -19,6 +19,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showLaunchPicker, setShowLaunchPicker] = useState(false);
   const [loginStatus, setLoginStatus] = useState<"" | "loading" | "sending" | "sent" | "no-token" | "error">("");
+  const [firebaseStatus, setFirebaseStatus] = useState<"" | "loading" | "injecting" | "done" | "no-token" | "error" | "logging-in" | "token-saved">("");
   const token = useAuthStore((s) => s.token);
   const reconnectTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -101,6 +102,10 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
               setErrorMsg(msg.message);
               setStatus("error");
               term.writeln(`\r\n\x1b[31m${msg.message}\x1b[0m`);
+              break;
+            case "firebase-token-saved":
+              setFirebaseStatus("token-saved");
+              setTimeout(() => setFirebaseStatus(""), 5000);
               break;
             case "pong":
               break;
@@ -234,6 +239,61 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
       setLoginStatus("error");
       setTimeout(() => setLoginStatus(""), 5000);
     }
+  }
+
+  async function handleAuthFirebase() {
+    setFirebaseStatus("loading");
+    try {
+      const authToken = useAuthStore.getState().token;
+      const res = await fetch("/api/connections/firebase/token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) {
+        if (res.status === 404) {
+          // No saved token — run firebase login:ci to authenticate and auto-capture
+          handleFirebaseLogin();
+          return;
+        }
+        throw new Error("Failed to fetch token");
+      }
+      const data = await res.json();
+
+      setFirebaseStatus("injecting");
+      // Exit Claude Code if running so we land in bash
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "input", data: "/exit\r" }));
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: "input",
+          data: `export FIREBASE_TOKEN="${data.token}" && clear\r`,
+        }));
+      }
+      await new Promise((r) => setTimeout(r, 400));
+
+      setFirebaseStatus("done");
+      setTimeout(() => setFirebaseStatus(""), 3000);
+      termInstance.current?.focus();
+    } catch {
+      setFirebaseStatus("error");
+      setTimeout(() => setFirebaseStatus(""), 5000);
+    }
+  }
+
+  function handleFirebaseLogin() {
+    setFirebaseStatus("logging-in");
+    // Exit Claude Code if running so firebase CLI runs in bash
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "input", data: "/exit\r" }));
+    }
+    setTimeout(() => {
+      sendCommand("clear");
+      setTimeout(() => {
+        sendCommand("firebase login:ci --no-localhost");
+        termInstance.current?.focus();
+      }, 300);
+    }, 600);
   }
 
   async function handleImageUpload(file: File) {
@@ -506,8 +566,33 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           </label>
           </div>
 
-          {/* Right: Launch Claude + Swap Model */}
+          {/* Right: Firebase Auth + Swap Model + Launch Claude */}
           <div className="flex items-center gap-2 shrink-0">
+            <button onClick={handleAuthFirebase}
+              disabled={firebaseStatus === "loading" || firebaseStatus === "injecting" || firebaseStatus === "logging-in"}
+              title="Inject saved Firebase token, or run firebase login:ci if none saved"
+              className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5"
+              style={{
+                background: firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success-muted)"
+                  : firebaseStatus === "error" ? "var(--color-error-muted)"
+                  : firebaseStatus === "logging-in" ? "rgba(255,167,38,0.15)"
+                  : "var(--color-bg-elevated)",
+                color: firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success)"
+                  : firebaseStatus === "error" ? "var(--color-error)"
+                  : "#FFA726",
+                border: `1px solid ${firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success)" : firebaseStatus === "error" ? "var(--color-error)" : "rgba(255,167,38,0.3)"}`,
+                opacity: firebaseStatus === "loading" || firebaseStatus === "injecting" || firebaseStatus === "logging-in" ? 0.7 : 1,
+              }}
+              onMouseEnter={(e) => { if (!firebaseStatus) { e.currentTarget.style.borderColor = "#FFA726"; e.currentTarget.style.background = "rgba(255,167,38,0.1)"; } }}
+              onMouseLeave={(e) => { if (!firebaseStatus) { e.currentTarget.style.borderColor = "rgba(255,167,38,0.3)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; } }}>
+              {firebaseStatus === "loading" ? "Fetching..."
+                : firebaseStatus === "injecting" ? "Injecting..."
+                : firebaseStatus === "done" ? "Token Set!"
+                : firebaseStatus === "logging-in" ? "Authenticating..."
+                : firebaseStatus === "token-saved" ? "Token Saved!"
+                : firebaseStatus === "error" ? "Failed"
+                : "Firebase Auth"}
+            </button>
             <button onClick={() => setShowModelPicker(true)}
               className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5"
               style={{ background: "var(--color-bg-elevated)", color: "var(--color-secondary)", border: "1px solid var(--color-secondary-muted)" }}
@@ -537,6 +622,24 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
         <div className="px-3 py-1.5 text-xs"
           style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
           Auto-login failed. Try manually or check your token in Connections.
+        </div>
+      )}
+      {firebaseStatus === "logging-in" && (
+        <div className="px-3 py-1.5 text-xs flex items-center gap-2"
+          style={{ background: "rgba(255,167,38,0.1)", color: "#FFA726" }}>
+          Running firebase login:ci — open the URL in your browser to authenticate. Your token will be auto-saved.
+        </div>
+      )}
+      {firebaseStatus === "token-saved" && (
+        <div className="px-3 py-1.5 text-xs flex items-center gap-2"
+          style={{ background: "var(--color-success-muted)", color: "var(--color-success)" }}>
+          Firebase token auto-captured and saved! Click "Firebase Auth" to inject it into your terminal.
+        </div>
+      )}
+      {firebaseStatus === "error" && (
+        <div className="px-3 py-1.5 text-xs"
+          style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
+          Firebase auth failed. Check your token in Connections.
         </div>
       )}
 

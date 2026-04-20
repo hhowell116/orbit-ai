@@ -22,10 +22,17 @@ export function ConnectionsPage() {
   const [githubSaving, setGithubSaving] = useState(false);
   const [githubMsg, setGithubMsg] = useState("");
 
+  // Firebase form
+  const [firebaseConnected, setFirebaseConnected] = useState(false);
+  const [firebaseToken, setFirebaseToken] = useState("");
+  const [firebaseSaving, setFirebaseSaving] = useState(false);
+  const [firebaseMsg, setFirebaseMsg] = useState("");
+
   useEffect(() => {
     Promise.all([
       broker.rawFetch("/connections/claude/status").then((d: any) => setClaudeConnected(d.connected)),
       broker.rawFetch("/connections/github/status").then((d: any) => setGithubConnected(d.connected)),
+      broker.rawFetch("/connections/firebase/status").then((d: any) => setFirebaseConnected(d.connected)),
     ]).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -76,6 +83,31 @@ export function ConnectionsPage() {
     try {
       await broker.deleteConnection("github");
       setGithubConnected(false);
+    } catch {}
+  }
+
+  async function handleSaveFirebase() {
+    if (!firebaseToken) return;
+    setFirebaseSaving(true);
+    setFirebaseMsg("");
+    try {
+      await broker.saveConnection("firebase", firebaseToken);
+      setFirebaseConnected(true);
+      setFirebaseToken("");
+      setFirebaseMsg("Connected!");
+      setTimeout(() => setFirebaseMsg(""), 3000);
+    } catch (err: any) {
+      setFirebaseMsg(err.message || "Failed to save");
+    } finally {
+      setFirebaseSaving(false);
+    }
+  }
+
+  async function handleDisconnectFirebase() {
+    if (!confirm("Disconnect Firebase?")) return;
+    try {
+      await broker.deleteConnection("firebase");
+      setFirebaseConnected(false);
     } catch {}
   }
 
@@ -355,6 +387,99 @@ export function ConnectionsPage() {
                 </p>
                 {githubMsg && (
                   <p className="text-xs mt-2" style={{ color: githubMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{githubMsg}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Firebase Connection */}
+          <div className="rounded-xl overflow-hidden"
+            style={{ background: "var(--color-bg-surface)", border: `1px solid ${firebaseConnected ? "rgba(127,216,143,0.3)" : "var(--color-border)"}` }}>
+
+            <div className="p-6 flex items-start gap-4">
+              <div className="shrink-0">
+                <svg viewBox="0 0 24 24" className="w-10 h-10">
+                  <path fill="#FFA726" d="M3.89 15.67L6.255 2.74a.39.39 0 01.742-.097l2.556 4.776L3.89 15.67z"/>
+                  <path fill="#F57C00" d="M20.11 15.67L17.745 2.74a.39.39 0 00-.742-.097L3.89 15.67 12 20.56l8.11-4.89z"/>
+                  <path fill="#FFCA28" d="M12 20.56l8.11-4.89L17.745 2.74a.39.39 0 00-.742-.097L14.13 8.14 9.553 7.42l-3.298-4.777a.39.39 0 00-.742.097L3.89 15.67 12 20.56z"/>
+                  <path fill="#FFA726" d="M12 22.09L2.78 16.52l1.11-0.85L12 20.56l8.11-4.89 1.11.85L12 22.09z"/>
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-medium" style={{ color: "var(--color-text-primary)" }}>Firebase</h3>
+                  {statusBadge(firebaseConnected)}
+                </div>
+                <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                  {firebaseConnected
+                    ? "Your Firebase CI token is connected — deploy directly from the terminal"
+                    : "Add your Firebase CI token for deployments from this VM"}
+                </p>
+              </div>
+              {firebaseConnected && !loading && (
+                <button onClick={handleDisconnectFirebase} className="shrink-0 text-xs px-3 py-1.5 rounded-lg"
+                  style={{ background: "var(--color-error-muted)", color: "var(--color-error)" }}>
+                  Disconnect
+                </button>
+              )}
+            </div>
+
+            {/* Features */}
+            <div className="px-6 pb-4">
+              <div className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: "var(--color-text-muted)" }}>
+                {firebaseConnected ? "Active features" : "Features when connected"}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {["Deploy to Firebase Hosting", "Firebase CLI authentication", "One-click token injection", "No interactive login needed"].map((f) => (
+                  <div key={f} className="flex items-center gap-2 text-xs" style={{ color: firebaseConnected ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
+                    <span style={{ color: firebaseConnected ? "var(--color-success)" : "var(--color-text-muted)" }}>
+                      {firebaseConnected ? "+" : "\u00b7"}
+                    </span>
+                    {f}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Firebase token input */}
+            {!firebaseConnected && !loading && (
+              <div className="px-6 pb-6" style={{ borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
+                <div className="rounded-lg p-3 mb-3" style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}>
+                  <p className="text-xs font-medium mb-2" style={{ color: "var(--color-text-primary)" }}>How to get your Firebase CI token:</p>
+                  <ol className="text-xs space-y-1.5" style={{ color: "var(--color-text-secondary)", paddingLeft: "16px" }}>
+                    <li>On your <strong>local machine</strong> (with a browser), run:
+                      <code className="block mt-1 px-2 py-1 rounded text-xs" style={{ background: "var(--color-bg-hover)", color: "#FFA726" }}>firebase login:ci</code>
+                    </li>
+                    <li>Authorize in your browser when prompted</li>
+                    <li>Copy the token it outputs (starts with <code style={{ color: "#FFA726" }}>1//...</code>)</li>
+                    <li>Paste it below</li>
+                  </ol>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={firebaseToken}
+                    onChange={(e) => setFirebaseToken(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-mono focus:outline-none"
+                    style={{ background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
+                    onFocus={(e) => (e.target.style.borderColor = "#FFA726")}
+                    onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+                    placeholder="1//0..."
+                  />
+                  <button onClick={handleSaveFirebase} disabled={firebaseSaving || !firebaseToken}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{
+                      background: firebaseSaving || !firebaseToken ? "var(--color-bg-hover)" : "#FFA726",
+                      color: firebaseSaving || !firebaseToken ? "var(--color-text-muted)" : "#000",
+                    }}>
+                    {firebaseSaving ? "Saving..." : "Connect"}
+                  </button>
+                </div>
+                <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
+                  Your token is stored securely. Click "Firebase Auth" in the terminal toolbar to inject it before deploying.
+                </p>
+                {firebaseMsg && (
+                  <p className="text-xs mt-2" style={{ color: firebaseMsg === "Connected!" ? "var(--color-success)" : "var(--color-error)" }}>{firebaseMsg}</p>
                 )}
               </div>
             )}

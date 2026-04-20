@@ -1130,6 +1130,31 @@ teamApi.get("/connections/github/status", (c) => {
   return c.json({ connected: false, reason: "No GitHub token configured" });
 });
 
+teamApi.get("/connections/firebase/status", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const conn = db.query("SELECT token FROM user_connections WHERE user_id = ? AND provider = 'firebase'").get(user.sub) as any;
+  if (conn?.token) {
+    return c.json({ connected: true });
+  }
+  return c.json({ connected: false, reason: "No Firebase token configured" });
+});
+
+teamApi.get("/connections/firebase/token", (c) => {
+  const user = c.get("user") as JWTPayload;
+  const conn = db.query(
+    "SELECT token FROM user_connections WHERE user_id = ? AND provider = 'firebase'"
+  ).get(user.sub) as { token: string } | null;
+  if (!conn?.token) {
+    return c.json({ error: "No Firebase token configured. Go to Connections to add one." }, 404);
+  }
+  try {
+    const decrypted = decrypt(conn.token);
+    return c.json({ token: decrypted });
+  } catch {
+    return c.json({ error: "Failed to decrypt token" }, 500);
+  }
+});
+
 teamApi.get("/connections", (c) => {
   const user = c.get("user") as JWTPayload;
   const connections = db.query("SELECT provider, created_at, updated_at FROM user_connections WHERE user_id = ?").all(user.sub);
@@ -1141,8 +1166,8 @@ teamApi.put("/connections/:provider", async (c) => {
   const { provider } = c.req.param();
   const { token } = await c.req.json<{ token: string }>();
 
-  if (!["claude", "github"].includes(provider)) {
-    return c.json({ error: "Invalid provider. Must be 'claude' or 'github'" }, 400);
+  if (!["claude", "github", "firebase"].includes(provider)) {
+    return c.json({ error: "Invalid provider. Must be 'claude', 'github', or 'firebase'" }, 400);
   }
   if (!token) {
     return c.json({ error: "Token is required" }, 400);
@@ -1520,6 +1545,8 @@ const disconnectTimers = new Map<string, Timer>(); // sessionKey → grace perio
 // Track current Claude file activity by scanning PTY output
 const sessionFileActivity = new Map<string, Map<string, { action: string; ts: number }>>();
 const sessionOutputBuffers = new Map<string, string>(); // buffer last ~4KB of output per session
+const firebaseTokenBuffers = new Map<string, string>(); // separate buffer for Firebase CI token detection
+const firebaseTokenCaptured = new Set<string>(); // track sessions where we already captured a token this run
 
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\r/g, "");
@@ -1566,6 +1593,46 @@ function scanClaudeActivity(sessionKey: string, raw: string) {
   }
 }
 
+function scanFirebaseToken(sessionKey: string, userId: string, raw: string) {
+  if (firebaseTokenCaptured.has(sessionKey)) return;
+
+  let buffer = (firebaseTokenBuffers.get(sessionKey) || "") + raw;
+  if (buffer.length > 8192) buffer = buffer.slice(-8192);
+  firebaseTokenBuffers.set(sessionKey, buffer);
+
+  const text = stripAnsi(buffer);
+
+  // Firebase login:ci prints: "✔  Success! Use this token to login on a CI server:\n\n1//0abc..."
+  // The token is a Google OAuth2 refresh token starting with 1//
+  const match = text.match(/(?:Success!|token to login|Refresh Token:)\s*[\r\n\s]+(1\/\/[\w\-_\.]{20,})/i);
+  if (!match) return;
+
+  const firebaseToken = match[1];
+  firebaseTokenCaptured.add(sessionKey);
+  firebaseTokenBuffers.delete(sessionKey);
+
+  // Save the token encrypted to the user's Firebase connection
+  try {
+    const encryptedToken = encrypt(firebaseToken);
+    db.run(`
+      INSERT INTO user_connections (user_id, provider, token, updated_at)
+      VALUES (?, 'firebase', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, provider) DO UPDATE SET token = ?, updated_at = CURRENT_TIMESTAMP
+    `, [userId, encryptedToken, encryptedToken]);
+    console.log(`[firebase] Auto-captured CI token for user ${userId}`);
+
+    // Notify the dashboard via WebSocket
+    const clients = wsClients.get(sessionKey);
+    if (clients) {
+      for (const client of clients) {
+        try { client.send(JSON.stringify({ type: "firebase-token-saved" })); } catch {}
+      }
+    }
+  } catch (err) {
+    console.error("[firebase] Failed to save auto-captured token:", err);
+  }
+}
+
 // Send a warning message directly into a specific user's terminal
 function sendTerminalWarning(userId: string, projectId: string, message: string) {
   const key = `${userId}:${projectId}`;
@@ -1582,11 +1649,12 @@ setTerminalWarningFn(sendTerminalWarning);
 
 // Wire PTY output to all WebSocket clients for a session (called once per session)
 const wiredSessions = new Set<string>();
-function wireSessionOutput(sessionKey: string, session: any) {
+function wireSessionOutput(sessionKey: string, session: any, userId: string) {
   if (wiredSessions.has(sessionKey)) return; // Already wired
   wiredSessions.add(sessionKey);
   session.pty.onData((data: string) => {
     scanClaudeActivity(sessionKey, data);
+    scanFirebaseToken(sessionKey, userId, data);
     const clients = wsClients.get(sessionKey);
     if (clients) {
       for (const client of clients) {
@@ -1696,7 +1764,7 @@ export default {
       }
 
       // Wire PTY output to WebSocket clients (once per session, not per client)
-      wireSessionOutput(sessionKey, session);
+      wireSessionOutput(sessionKey, session, userId);
 
       // Send buffered output for reconnection
       const buffer = getSessionBuffer(userId, projectId || undefined);
