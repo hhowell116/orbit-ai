@@ -595,20 +595,18 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
               style={{
                 background: firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success-muted)"
                   : firebaseStatus === "error" ? "var(--color-error-muted)"
-                  : firebaseStatus === "logging-in" ? "rgba(255,167,38,0.15)"
                   : "var(--color-bg-elevated)",
                 color: firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success)"
                   : firebaseStatus === "error" ? "var(--color-error)"
                   : "#FFA726",
                 border: `1px solid ${firebaseStatus === "done" || firebaseStatus === "token-saved" ? "var(--color-success)" : firebaseStatus === "error" ? "var(--color-error)" : "rgba(255,167,38,0.3)"}`,
-                opacity: firebaseStatus === "loading" || firebaseStatus === "injecting" || firebaseStatus === "logging-in" ? 0.7 : 1,
+                opacity: firebaseStatus === "loading" || firebaseStatus === "injecting" ? 0.7 : 1,
               }}
               onMouseEnter={(e) => { if (!firebaseStatus) { e.currentTarget.style.borderColor = "#FFA726"; e.currentTarget.style.background = "rgba(255,167,38,0.1)"; } }}
               onMouseLeave={(e) => { if (!firebaseStatus) { e.currentTarget.style.borderColor = "rgba(255,167,38,0.3)"; e.currentTarget.style.background = "var(--color-bg-elevated)"; } }}>
               {firebaseStatus === "loading" ? "Fetching..."
                 : firebaseStatus === "injecting" ? "Injecting..."
                 : firebaseStatus === "done" ? "Token Set!"
-                : firebaseStatus === "logging-in" ? "Authenticating..."
                 : firebaseStatus === "token-saved" ? "Token Saved!"
                 : firebaseStatus === "error" ? "Failed"
                 : "Firebase Auth"}
