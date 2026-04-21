@@ -138,12 +138,13 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     // Handle Ctrl+V paste and Ctrl+C copy
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === "keydown" && e.ctrlKey && e.key === "v") {
+        e.preventDefault();
         navigator.clipboard.readText().then((text) => {
           if (text && wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: "input", data: text }));
           }
         }).catch(() => {});
-        return false; // Prevent default
+        return false;
       }
       if (e.type === "keydown" && e.ctrlKey && e.key === "c") {
         const selection = term.getSelection();
