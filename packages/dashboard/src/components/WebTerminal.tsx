@@ -140,8 +140,9 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
       if (e.type === "keydown" && e.ctrlKey && e.key === "v") {
         e.preventDefault();
         navigator.clipboard.readText().then((text) => {
-          if (text && wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "input", data: text }));
+          const cleaned = text?.replace(/[\r\n]+$/, "");
+          if (cleaned && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "input", data: cleaned }));
           }
         }).catch(() => {});
         return false;
@@ -161,7 +162,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     // Handle paste event (right-click paste, etc.)
     termRef.current.addEventListener("paste", (e: ClipboardEvent) => {
       e.preventDefault();
-      const text = e.clipboardData?.getData("text");
+      const text = e.clipboardData?.getData("text")?.replace(/[\r\n]+$/, "");
       if (text && wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "input", data: text }));
       }
@@ -556,7 +557,7 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
           <span style={{ width: "1px", height: "16px", background: "var(--color-border)", margin: "0 2px" }} />
           <button onClick={async () => {
             try {
-              const text = await navigator.clipboard.readText();
+              const text = (await navigator.clipboard.readText())?.replace(/[\r\n]+$/, "");
               if (text && wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(JSON.stringify({ type: "input", data: text }));
               }
