@@ -131,7 +131,10 @@ export function WebTerminal({ projectId }: WebTerminalProps) {
     // Send terminal input to server
     term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "input", data }));
+        // Strip trailing newlines from pasted text to prevent auto-execution.
+        // Typed Enter sends a single "\r"; pasted text is multi-char.
+        const cleaned = data.length > 1 ? data.replace(/[\r\n]+$/, "") : data;
+        wsRef.current.send(JSON.stringify({ type: "input", data: cleaned }));
       }
     });
 
