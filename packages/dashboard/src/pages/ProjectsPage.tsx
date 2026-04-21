@@ -473,7 +473,7 @@ export function ProjectsPage() {
 
         {/* Main content — centered */}
         <main className="flex-1 p-6" style={{ textAlign: "center" }}>
-          <div style={{ maxWidth: "900px", margin: "0 auto", textAlign: "left" }}>
+          <div style={{ textAlign: "left" }}>
 
           {/* Connection error */}
           {error && (
@@ -626,7 +626,7 @@ export function ProjectsPage() {
           </div>
 
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[1, 2, 3].map((i) => (
                 <div
                   key={i}
@@ -646,7 +646,7 @@ export function ProjectsPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {projects.map((project) => (
                 <button
                   key={project.id}
