@@ -161,6 +161,8 @@ export async function createSession(
     const dataListeners: ((data: string) => void)[] = [];
 
     const socket = connect({ port: tcpPort, host: "127.0.0.1" });
+    socket.setKeepAlive(true, 60_000);
+    socket.setNoDelay(true);
 
     socket.on("connect", () => {
       console.log(`[terminal] TCP connected to worker on port ${tcpPort}`);
@@ -273,7 +275,7 @@ export function getSessionBuffer(userId: string, projectId?: string): string[] {
 }
 
 // Clean up idle sessions (call periodically)
-export function cleanupIdleSessions(maxIdleMs: number = 30 * 60 * 1000) {
+export function cleanupIdleSessions(maxIdleMs: number = 12 * 60 * 60 * 1000) {
   const now = Date.now();
   for (const [key, session] of sessions) {
     if (now - session.lastActivity > maxIdleMs) {

@@ -1871,9 +1871,9 @@ export default {
       if (clients) {
         clients.delete(ws);
         if (clients.size === 0) {
-          console.log(`[ws] All clients disconnected from ${sessionKey} — grace period started`);
+          console.log(`[ws] All clients disconnected from ${sessionKey} — 5-min grace period started`);
 
-          // Grace period: wait 10 seconds before marking session as ended.
+          // Grace period: wait 5 minutes before marking session as ended.
           // If the client reconnects within this window, the timer is cancelled.
           const timer = setTimeout(() => {
             disconnectTimers.delete(sessionKey);
@@ -1898,7 +1898,7 @@ export default {
                 }
               }
             }
-          }, 10_000);
+          }, 5 * 60 * 1000);
 
           disconnectTimers.set(sessionKey, timer);
         }
