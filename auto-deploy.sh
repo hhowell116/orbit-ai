@@ -58,13 +58,11 @@ while true; do
     rm -f "$CLAUDE_UPDATE_STAMP"
   fi
 
-  # Periodic tunnel health check via systemd (every poll cycle)
-  if ! systemctl --user is-active --quiet cloudflared-tunnel.service; then
-    echo "$(date) - Tunnel not running, restarting via systemd..." | tee -a "$LOG_FILE"
-    systemctl --user restart cloudflared-tunnel.service
-    sleep 2
-    echo "$(date) - Tunnel restarted via systemd" | tee -a "$LOG_FILE"
-  fi
+  # Tunnel health is owned by systemd (Restart=always) + orbit-watchdog.timer.
+  # Removed duplicate is-active restart here — it raced with systemd's own
+  # restart loop during the May 4 outage, where every transient transition
+  # was misread as "tunnel down" and triggered a restart on top of an
+  # in-progress restart, deepening the failure.
 
   # Daily Claude Code auto-update — runs once every 24 hours
   NEED_UPDATE=false
